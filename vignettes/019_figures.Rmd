@@ -1,0 +1,147 @@
+---
+title: "figures"
+author: "Nadege Belouard"
+date: "3/30/2022"
+output: html_document
+---
+```{r test run function to attribute sectors, echo = params$display, eval = params$run}
+
+# Reload the grid_data file directly
+grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"), h=T)
+centroid <- c(-75.675340, 40.415240)
+
+# Examples
+# 8 sectors
+grid_data_8S <- attribute_sectors(grid_data, nb_sectors = 8, centroid = centroid, rotation = 10)
+unique(grid_data_8S$bio_year)
+
+# 20 sectors
+grid_data_20S <- attribute_sectors(grid_data, nb_sectors = 20, centroid = centroid, rotation = 10)
+
+# Bind datasets together
+grid_data_allrotations_S8_20 <- bind_rows(grid_data_8S, grid_data_20S)
+
+centroid <- c(long = -75.675340, lat = 40.415240)
+
+#pivot_longer for figures
+grid_data_long <- grid_data_allrotations_S8_20 %>% 
+  pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", values_to = "sectors_nb", names_prefix = "rotation", names_transform = list(rotation_nb = as.integer)) 
+```
+
+
+
+```{r map of 8-20 sectors together, fig.cap = "Maps of the different number of sectors used, with established SLF colored by sector (2014-2020)", fig.height = 6, fig.width = 8, warning = F, echo = params$display}
+
+
+# map_8_20S <-  ggplot(data = states) +
+#   # geom_point(data = grid_data_long %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+#              # aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(sectors_nb)),
+#              # shape = 19, size = 2, show.legend=F) +
+#   # scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 5))) +
+#   # geom_point(data = grid_data_long,
+#              # aes(x = centroid[1], 
+#                  # y = centroid[2]),
+#              # col = "blue", shape = 4, size = 5) +
+#   # geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+#   geom_sf(data = states, alpha = 0) + 
+#   # facet_wrap(~sectors, ncol = 4) +
+#   coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+#   labs(x = "Longitude", y = "Latitude", col = "Sectors")
+# 
+# 
+# map_8_20S_all <-  ggplot(data = states) +
+#   geom_point(data = grid_data_long %>% filter(sectors == 8),
+#              aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(sectors_nb)), 
+#              shape = 19, size = 2, show.legend=F) +
+#   scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 5))) +
+#   geom_point(data = grid_data_long,
+#              aes(x = centroid[1], 
+#                  y = centroid[2]),
+#              col = "blue", shape = 4, size = 5) +
+#   # geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+#   geom_sf(data = states, alpha = 0) + 
+#   facet_wrap(~sectors, ncol = 4) +
+#   coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5)) +
+#   labs(x = "Longitude", y = "Latitude", col = "Sectors")
+
+```
+
+
+```{r map of 8-12-16 sectors separated with 0 rotation, fig.cap = "Map of surveys with established SLF colored by sector (2014-2020)", fig.height = 6, fig.width = 8, warning = F, echo = params$display}
+
+map_8sectors <-  ggplot(data = states) +
+  geom_point(data = grid_data_long %>% filter(sectors == 8 & Status == "Established"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(sectors_nb)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 4))) +
+  geom_point(data = grid_data_long %>% filter(sectors == 8 & Status == "Established"),
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 2) +
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-90, -70), ylim = c(35, 45)) +
+  labs(x = "Longitude", y = "Latitude", col = "Sectors")
+
+ggsave("../figures/vignette_quadrants/sectors_map/map_8sectors_rotate0.jpg", map_8sectors, width = 6, height = 6)
+
+
+map_20sectors <-  ggplot(data = states) +
+  geom_point(data = grid_data_long %>% filter(sectors == 20 & Status == "Established"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(sectors_nb)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 5))) +
+  geom_point(data = grid_data_long %>% filter(sectors == 20 & Status == "Established"),
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 2) +
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-90, -70), ylim = c(35, 45)) +
+  labs(x = "Longitude", y = "Latitude", col = "Sectors")
+
+ggsave("../figures/vignette_quadrants/sectors_map/map_20sectors_rotate0.jpg", map_20sectors, width = 6, height = 6)
+```
+
+
+We generate maps of the delimitation of sectors for each number of disk portions AND for each rotation (10 rotations * 4 numbers of disk portions).
+
+
+```{r map of each rotation of sectors for each number of sectors, fig.cap = "Map of surveys with established SLF colored by sector (2014-2020)", fig.height = 6, fig.width = 8, warning = F, echo = params$display}
+
+map_8sectors_wrap <-  ggplot(data = states) +
+  geom_point(data = grid_data_long %>% filter(sectors == 8 & Status == "Established"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(sectors_nb)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 2))) +
+  geom_point(data = grid_data_long %>% filter(sectors == 8 & Status == "Established"),
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 2) +
+  geom_sf(data = states, alpha = 0) + 
+  facet_wrap(~rotation_nb, ncol = 5) +
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Sectors")
+
+ggsave("../figures/vignette_quadrants/sectors_map/map_8sectors.jpg", map_8sectors_wrap, width = 15, height = 6)
+
+map_20sectors_wrap <-  ggplot(data = states) +
+  geom_point(data = grid_data_long  %>% filter(sectors == 20 & Status == "Established"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(sectors_nb)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 5))) +
+  geom_point(data = grid_data_long %>% filter(sectors == 20 & Status == "Established"),
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 2) +
+  geom_sf(data = states, alpha = 0) + 
+  facet_wrap(~rotation_nb, ncol = 5) +
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Sectors")
+
+ggsave("../figures/vignette_quadrants/sectors_map/map_20sectors.jpg", map_20sectors_wrap, width = 15, height = 6)
+
+
+```

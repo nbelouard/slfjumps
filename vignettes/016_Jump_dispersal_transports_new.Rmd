@@ -1,0 +1,2715 @@
+---
+title: "Making the most of invasion records, the case of the spotted lanternfly, part II: Testing the significance of the location of jumpers, diffusers, and non-detections"
+author: 
+- Nadege Belouard^[Temple University, nadege.belouard@temple.edu]
+- Sebastiona De Bona^[Temple University, seba.debona@temple.edu]
+- Jocelyn E. Behm^[Temple University, jebehm@temple.edu]
+- Matthew R. Helmus^[Temple University, mrhelmus@temple.edu]
+date: "5/1/2021"
+output:
+  pdf_document:
+    toc: TRUE
+    toc_depth: 2
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+params:
+  show_code: FALSE
+  export_figures: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup for rendering, include = F}
+# here we set the images to png, to reduce the size of the output
+# we set some global paramters in the yaml to allow us to switch the chunks
+# of code on and off when displaying
+knitr::opts_chunk$set(dpi = 300, echo = params$show_code)
+```
+
+# Aim and setup
+ 
+For this second vignette, we want to test the anthropogenic character of jump events identified in the first vignette. Our working hypotheses are that (1) SLF hitchhike on roads, railroads, and regional planes, and thus, establish along major transport infrastructures, and (2) SLF get trapped and transported with materials and are dropped at their destination (international airports, intermodal platforms, mail carriers, gathering points, landscaping companies...). To test the significance of this pattern, we measure the distance between the location of jump events (SLF hereafter called 'jumpers') and each type of transport infrastructure. 
+
+Then:   
+
+- To determine whether these jumps are situated significantly closer than random to transport infrastructures, we compare the average value of this distance to a null distribution.  
+
+- To make sure that any significant result would not be due to surveys being conducted mostly close to transport infrastructures, we also calculate the distance to transport infrastructures for SLF established through diffusive spread (SLF hereafter called 'diffusers'), and for surveys that did not detect SLF (hereafter 'undetected'). We test the significance of the distance to transport infrastructures for these two categories using random distributions again.  
+
+- Finally, we test whether jumpers are found significantly closer to transport infrastructures than diffusers or undetected, to see if there is also a direct and significant difference between these categories.  
+
+  
+```{r states names and centroid for global map, message = FALSE, warning = FALSE, echo = params$display}
+
+library(tidyverse)
+library(sf)
+library(spData)
+library(RVAideMemoire)
+library(dplyr)
+library(gridExtra)
+library(magrittr)
+library(purrr)
+library(here)
+library(FSA)
+
+# extracts a map of the States and recodes state labels to show the two-letter code rather than the full state name.
+
+# obtaining simple feature objects for states and finding centroids for label positioning
+states <- sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
+states <- cbind(states, st_coordinates(st_centroid(states)))
+states <- st_transform(states, crs = "ESRI:102010")
+st_crs(states)
+
+# making table key for state 2-letter abbreviations
+# the vectors state.abb and state.name contains strings of all
+# US states and abbreviations
+state_abbr <- tibble(state.name = str_to_lower(state.name), state.abb) %>% 
+  left_join(tibble(ID = states$ID), ., by = c(ID = "state.name")) %>% 
+  mutate(state.abb = replace_na(state.abb, ""))
+
+# adding 2-letter codes to sf
+states$code <- state_abbr$state.abb
+
+US <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/states/gadm36_Cont_USA_county/gadm36_Cont_USA_county.shp", crs = "EPSG:4326", quiet = T)
+st_crs(US)
+US <- st_transform(US, crs = "ESRI:102010")
+```
+
+
+# 1. Correlation between variables: how far are airports and ports from railroads and roads?
+
+Load the GIS shapefiles for the landscape data
+
+```{r load landscape features, message = FALSE, warning = FALSE}
+
+#Shapefiles for:
+
+## SLF dropped along the way:
+# Railroads (lines, buffer radius = 5 m)
+# These are railroads as defined by the USGS National Transportation Dataset. All lines have been merged and projected before buffer construction.
+rail <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Railroads/Railways_full_buffer5m.shp", quiet = T)
+st_crs(rail)
+
+# Full dataset
+# Rail
+rail_21180 <- st_buffer(rail, dist = 21180) #100% jumps
+st_write(rail_21180, file.path(here(), "figures", "GIS", "rail_buffer_21180.shp"))
+
+rail_6570 <- st_buffer(rail, dist = 6570) #95% jumps
+st_write(rail_6570, file.path(here(), "figures", "GIS", "rail_buffer_6570.shp"))
+
+rail_1340 <- st_buffer(rail, dist = 1340) #75% jumps
+st_write(rail_1340, file.path(here(), "figures", "GIS", "rail_buffer_1340.shp"))
+
+
+# Rarefied dataset
+rail_9790 <- st_buffer(rail, dist = 9790) #100% jumps
+st_write(rail_9790, file.path(here(), "figures", "GIS", "rail_buffer_9790.shp"))
+
+rail_7120 <- st_buffer(rail, dist = 7120) #95% jumps
+st_write(rail_7120, file.path(here(), "figures", "GIS", "rail_buffer_7120.shp"))
+
+rail_2590 <- st_buffer(rail, dist = 2590) #75% jumps
+st_write(rail_2590, file.path(here(), "figures", "GIS", "rail_buffer_2590.shp"))
+
+
+# Roads (lines, buffer radius = 15 m)
+# This shapefile contains primary and secondary roads as defined by the US Census bureau. There is no information on traffic volume (AADT). All lines have been merged and projected before buffer construction.
+road <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Roads/Prisec_roads/road_buffer15m.shp", quiet = T)
+# st_write(road_buffer15m, here::here(file.path("exported-data", "road_buffer15m.shp", driver = "ESRI Shapefile")))
+st_crs(road)
+
+# Road
+road_3570 <- st_buffer(road, dist = 3570) #100% jumps
+st_write(road_3570, file.path(here(), "figures", "GIS", "road_buffer_3570.shp"))
+
+road_1810 <- st_buffer(road, dist = 1810) #95% jumps
+st_write(road_1810, file.path(here(), "figures", "GIS", "road_buffer_1810.shp"))
+
+road_730 <- st_buffer(road, dist = 730) #75% jumps
+st_write(road_730, file.path(here(), "figures", "GIS", "road_buffer_730.shp"))
+
+
+# Rarefied dataset
+road_3370 <- st_buffer(road, dist = 3370) #100% jumps
+st_write(road_3370, file.path(here(), "figures", "GIS", "road_buffer_3370.shp"))
+
+road_2970 <- st_buffer(road, dist = 2970) #95% jumps
+st_write(road_2970, file.path(here(), "figures", "GIS", "road_buffer_2970.shp"))
+
+road_980 <- st_buffer(road, dist = 980) #75% jumps
+st_write(road_980, file.path(here(), "figures", "GIS", "road_buffer_980.shp"))
+
+
+
+# Intersections
+# Full dataset
+Rail_road_full_100 <- st_intersection(rail_21180, road_3570)
+st_write(Rail_road_full_100, file.path(here(), "figures", "GIS", "road_rail_intersect_full_100.shp"))
+
+Rail_road_full_95 <- st_intersection(rail_6570, road_1810)
+st_write(Rail_road_full_95, file.path(here(), "figures", "GIS", "road_rail_intersect_full_95.shp"))
+
+Rail_road_full_75 <- st_intersection(rail_1340, road_730)
+st_write(Rail_road_full_75, file.path(here(), "figures", "GIS", "road_rail_intersect_full_75.shp"))
+
+# Rare dataset
+Rail_road_rare_100 <- st_intersection(rail_9790, road_3370)
+st_write(Rail_road_rare_100, file.path(here(), "figures", "GIS", "road_rail_intersect_rare_100.shp"))
+
+Rail_road_rare_95 <- st_intersection(rail_7120, road_2970)
+st_write(Rail_road_rare_95, file.path(here(), "figures", "GIS", "road_rail_intersect_rare_95.shp"))
+
+Rail_road_rare_75 <- st_intersection(rail_2590, road_980)
+st_write(Rail_road_rare_75, file.path(here(), "figures", "GIS", "road_rail_intersect_rare_75.shp"))
+dim(Rail_road_rare_75)
+
+## SLF dropped at destination:
+# through people transportation:
+
+# Primary airports (points, buffer radius = 1 000 m)
+# List given by FAA, location given by National Transportation Dataset (USGS)
+airports <- st_read(filepath(here(), C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Airports/airports_primary_buffer.shp", quiet = T)
+airports <- st_transform(airports, crs = "ESRI:102010")
+st_crs(airports)
+
+# Through goods transportation:
+# Ports (points, buffer radius = 200 m)
+# These are ports as defined by the USGS ScienceBase-Catalog
+ports <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Ports/Ports_projected_buffer200.shp", quiet = T)
+st_crs(ports)
+
+
+# Visualize shapefiles
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_point(data = slf_uptodate, aes(x = longitude_rounded, latitude_rounded), col = "grey", size = 0.1) +
+  # geom_sf(data = road, col = "black", size = 2) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+```
+
+## Risk buffer
+```{r map risk buffer}
+
+rail_6570 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_6570.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_rail_6570.jpg"), rail, width = 6, height = 6)
+
+
+####
+
+
+rail_1340 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_1340.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = rail_1340, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_rail_1340.jpg"), rail, width = 6, height = 6)
+
+
+
+####
+
+
+rail_21180 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_21180.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
+    geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+    geom_sf(data = rail_1340, fill = "red", col = "red") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_rail_95_75.jpg"), rail, width = 6, height = 6)
+
+
+
+
+### roads
+
+####
+
+
+road_1810 <- st_read(file.path(here(), "figures", "GIS", "road_buffer_1810.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
+    # geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+    geom_sf(data = road_1810, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_road_1810.jpg"), rail, width = 6, height = 6)
+
+
+
+### 
+
+road_730 <- st_read(file.path(here(), "figures", "GIS", "road_buffer_730.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
+    # geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+    geom_sf(data = road_730, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_road_730.jpg"), rail, width = 6, height = 6)
+
+
+
+## intersect
+
+road_rail_75 <- st_read(file.path(here(), "figures", "GIS", "road_rail_intersect_full_75.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
+    # geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+    geom_sf(data = road_rail_75, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_roadrail_75.jpg"), rail, width = 6, height = 6)
+
+```
+
+```{r check distance airports with railroads and roads}
+
+# Calculate the distances to transport infrastructures (from the data frame)
+airports %<>% add_column(DistToRail = NA,
+                         DistToRoad = NA) %>% 
+  st_cast("POLYGON")
+
+# Visualize shapefiles
+ggplot(data = states) +
+    geom_sf(fill = "white") +
+  geom_sf(data = airports, col = "blue") +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+
+#Calculate their distance to transport infrastructures
+for (j in 1:length(airports$DistToRail)){ 
+  print(j)
+  point_clip <- st_buffer(airports[j,], dist = 5000)
+  
+  road_clip <- st_intersection(road, point_clip)
+  dist_road <- st_distance(x = airports[j,], y = road_clip)
+  airports$DistToRoad[j] <- min(dist_road)
+  
+  rail_clip <- st_intersection(rail, point_clip)
+  dist_rail <- st_distance(x = airports[j,], y = rail_clip)
+  airports$DistToRail[j] <- min(dist_rail)
+}
+
+airports %>% filter(DistToRail == Inf | is.na(DistToRail))
+airports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+
+for (j in 1:length(airports$DistToRail)){ 
+  if (airports$DistToRail[j] == Inf){
+    print(j)
+
+    # Calculate distance to the closest railroad
+    dist_rail <- st_distance(x = airports[j,], y = rail)
+    airports$DistToRail[j] <- min(dist_rail)
+  }
+  
+  if (airports$DistToRoad[j] == Inf){
+    print(j)
+
+    # Calculate distance to the closest road
+    dist_road <- st_distance(x = airports[j,], y = road)
+    airports$DistToRoad[j] <- min(dist_road)
+  }
+}
+
+
+## Same for ports
+ports %<>% add_column(DistToRail = NA,
+                      DistToRoad = NA) %>% 
+  st_cast("POLYGON")
+
+for (j in 1:length(ports$DistToRail)){ 
+  print(j)
+  point_clip <- st_buffer(ports[j,], dist = 1000)
+  
+  road_clip <- st_intersection(road, point_clip)
+  dist_road <- st_distance(x = ports[j,], y = road_clip)
+  ports$DistToRoad[j] <- min(dist_road)
+  
+  rail_clip <- st_intersection(rail, point_clip)
+  dist_rail <- st_distance(x = ports[j,], y = rail_clip)
+  ports$DistToRail[j] <- min(dist_rail)
+}
+
+
+ports %>% filter(DistToRail == Inf | is.na(DistToRail))
+ports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+``` 
+
+
+\newpage
+
+
+# 2. Calculate distances of SLF to transport infrastructures
+
+Load the dataset for the SLF data
+```{r load datasets, message = FALSE, warning = FALSE}
+
+# SLF data (in the folder SLF_datascience)
+# First, load the dataset that contains the location of each survey
+grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"))
+dim(grid_data)
+
+# Extract each point independently of the year it was sampled (for distance calculations)
+grid_data %<>% filter(bio_year != 2021) %>% select(latitude_rounded, longitude_rounded) %>%
+  distinct(latitude_rounded, longitude_rounded, .keep_all = T) 
+dim(grid_data) # 43,984 rows
+dim(grid_data %>% filter(longitude_rounded > -90)) #43,801
+
+# Make it a shapefile to visualize the data
+grid_layer <- st_as_sf(x = grid_data, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F)
+grid_layer <- st_transform(grid_layer, crs = "ESRI:102010")
+
+# Visualize the data
+# ggplot(data = states) +
+#     geom_sf(data = US, fill = "white") +
+#   geom_sf(data = grid_layer, col = "blue") +
+#     labs(x = "Longitude", y = "Latitude")
+
+# We want to remove individuals that are super far away (Oregon, Washington, Arizona, New Mexico, Missouri, Illinois)
+# Create a shapefile for the states we are interested in
+NE <- states %>% filter(ID %in% c("connecticut", "delaware", "district of columbia", "georgia",
+                            "indiana", "kentucky", "maryland", "massachusetts", "new hampshire",
+                            "new jersey", "new york", "north carolina", "ohio", "pennsylvania",
+                            "rhode island", "south carolina", "tennessee", "vermont", "virginia",
+                            "west virginia"))
+# NEbuff <- sf::st_buffer(NE, dist = 0) # This is because the map has self-intersections
+# slf_core <- st_intersection(grid_layer, NEbuff) # This causes problems because a few points are considered outside of the boundaries because of the rounding!
+
+# Try another way to filter out points that are very far
+slf_core <- grid_layer %>% filter(longitude_rounded > -90) 
+
+# Visualize the data
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+    geom_sf(data = NE, col = "blue") +
+  geom_sf(data = grid_layer, col = "red") +
+  geom_sf(data = slf_core, col = "blue") +
+      # coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+    labs(x = "Longitude", y = "Latitude")
+
+```
+
+
+Load the GIS shapefiles for the landscape data
+```{r load landscape features, message = FALSE, warning = FALSE}
+
+#Shapefiles for:
+
+## SLF dropped along the way:
+# Railroads (lines, buffer radius = 5 m)
+# These are railroads as defined by the USGS National Transportation Dataset. All lines have been merged and projected before buffer construction.
+rail <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Railroads/Railways_full_buffer5m.shp", quiet = T)
+st_crs(rail)
+
+# Roads (lines, buffer radius = 15 m)
+# This shapefile contains primary and secondary roads as defined by the US Census bureau. There is no information on traffic volume (AADT). All lines have been merged and projected before buffer construction.
+road <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Roads/Prisec_roads/road_buffer15m.shp", quiet = T)
+# st_write(road_buffer15m, here::here(file.path("exported-data", "road_buffer15m.shp", driver = "ESRI Shapefile")))
+st_crs(road)
+
+## SLF dropped at destination:
+# through people transportation:
+
+# Primary airports (points, buffer radius = 1 000 m)
+# List given by FAA, location given by National Transportation Dataset (USGS)
+airports <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Airports/airports_primary_buffer.shp", quiet = T)
+airports <- st_transform(airports, crs = "ESRI:102010")
+st_crs(airports)
+
+# Through goods transportation:
+# Ports (points, buffer radius = 200 m)
+# These are ports as defined by the USGS ScienceBase-Catalog
+ports <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Ports/Ports_projected_buffer200.shp", quiet = T)
+st_crs(ports)
+
+
+# Visualize shapefiles
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = ports, col = "blue") +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+```
+
+Calculate the distances of each observed point to transport infrastructure (once and for all!). This step was ran on the HPC.
+```{r distance of SLF to transport infrastructures, eval = FALSE}
+
+# Create rows for distances
+slf_core %<>% add_column(DistToRail = NA,
+                          DistToRoad = NA,
+                          DistToAirport = NA,
+                          DistToPort = NA)
+
+#Calculate their distance to transport infrastructures
+for (j in 1:length(slf_core$DistToRail)){ 
+  # Print the row being considered
+  print(j)
+  
+  point_clip <- st_buffer(slf_core[j,], dist = 50000)
+  
+  # Calculate distance to the closest railroad
+  rail_clip <- st_intersection(rail, point_clip)
+  dist_rail <- st_distance(x = slf_core[j,], y = rail_clip)
+  slf_core$DistToRail[j] <- min(dist_rail)
+  
+  # Calculate distance to the closest major road
+  road_clip <- st_intersection(road, point_clip)
+  dist_road <- st_distance(x = slf_core[j,], y = road_clip)
+  slf_core$DistToRoad[j] <- min(dist_road)
+  
+  # Calculate distance to the closest international/millitary airport
+  dist_airport <- st_distance(x = slf_core[j,], y = airports)
+  slf_core$DistToAirport[j] <- min(dist_airport)
+  
+  # Calculate distance to the closest port
+  dist_port <- st_distance(x = slf_core[j,], y = ports)
+  slf_core$DistToPort[j] <- min(dist_port)
+  
+  rm(point_clip, rail_clip, road_clip)
+  
+  if (i %% 1000 == 0){
+    write.csv(slf_core, file.path(here(), "exported-data", "Distances_observed", "grid_distances_transport.csv", row.names = F)
+  }
+}
+
+# Save file
+st_geometry(slf_core) <- NULL
+dist_transports <- slf_core
+write.csv(slf_core, "./exported-data/Distances_observed/grid_distances_transport.csv", row.names = F)
+
+# slf_core <- read.csv(file.path(here(), "exported-data", "Distances_observed", "grid_distances_transport.csv"))
+# dim(slf_core)
+```
+
+\newpage
+
+
+# 3. Create datasets for jumpers/diffusers/negatives
+
+Merge distances for each unique point with the full data frame (with duplicates)
+```{r add distances to full data frame}
+
+# SLF data (in the folder SLF_datascience)
+grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"))
+grid_data %<>% filter(!bio_year == 2021, longitude_rounded > -90) 
+head(grid_data)
+dim(grid_data) #58,143
+
+# Distance data
+dist_transports <- read.csv("./exported-data/Distances_observed/grid_distances_transport.csv")
+dim(dist_transports)
+head(dist_transports)
+
+# Check if there are points without distance
+dist_transports %>% filter(DistToRail > 50000)
+dist_transports %>% filter(DistToRoad > 50000)
+
+#Calculate the distance for points were they are missing
+grid_transports <- st_as_sf(x = dist_transports, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F)
+grid_transports <- st_transform(grid_transports, crs = "ESRI:102010")
+    
+for (j in 1:length(grid_transports$DistToRail)){ 
+  if (grid_transports$DistToRail[j] > 50000){
+    print(j)
+
+    # Calculate distance to the closest railroad
+    dist_rail <- st_distance(x = grid_transports[j,], y = rail)
+    grid_transports$DistToRail[j] <- min(dist_rail)
+  }
+  
+  if (grid_transports$DistToRoad[j] > 50000){
+    print(j)
+
+    # Calculate distance to the closest road
+    dist_road <- st_distance(x = grid_transports[j,], y = road)
+    grid_transports$DistToRoad[j] <- min(dist_road)
+  }
+}
+
+st_geometry(grid_transports) <- NULL
+grid_transports %>% filter(DistToRail == Inf | is.na(DistToRail))
+grid_transports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+
+# Save this file
+write.csv(grid_transports, file.path(here(), "exported-data", "Distances_observed", "grid_distances_transport_corrected.csv"), row.names = F)
+
+grid_transports <- read.csv(file.path(here(), "exported-data", "Distances_observed", "grid_distances_transport_corrected.csv"))
+# dim(grid_transports)
+grid_transports %>% filter(DistToRail == Inf | is.na(DistToRail))
+grid_transports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+
+# Join the distance data to the SLF data
+grid_data %<>% left_join(grid_transports)
+head(grid_data)
+dim(grid_data)
+
+# Check for NAs or Inf
+grid_data %>% filter(DistToRail == Inf | is.na(DistToRail))
+grid_data %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+
+write.csv(grid_data, file.path(here(), "exported-data", "grid_data_distances.csv"))
+```
+
+
+
+Attribute points to jumpers, diffusers or undetected
+```{r choose which dataset you are testing}
+
+# Reload the dataset if necessary
+grid_data <- read.csv(file.path(here(), "exported-data", "grid_data_distances.csv"))
+grid_data %>% filter(DistToRail == Inf | is.na(DistToRail))
+dim(grid_data)
+
+# Next load the dataset that contains all jumpers identified by sets of parameters
+jumpers <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
+# Identify the number of jumpers per set of parameters
+jumpers %>% group_by(Rarefied) %>% count()
+
+# This is where we get rid of the category "Present". If it is not established, then it is negative.
+jumpers %<>% add_column(Category = "Jumpers")
+grid_data %<>% mutate(Category_out = ifelse(Status == "Established", "Diffusers", "Negatives"))
+
+###################
+# SCENARIO 1: full dataset (multiple jumps per location)
+###################
+
+# Put jumpers into the grid data and complete with the rest
+grid_full <- grid_data %>% left_join(jumpers %>% select(latitude_rounded, longitude_rounded, bio_year, Category, Status)) %>% 
+  mutate(Category = ifelse(is.na(Category), Category_out, Category)) %>% 
+  select(-Category_out)
+
+# Verify we still have the right number of jumps
+dim(grid_full %>% filter(Category == "Jumpers"))[1] == dim(jumpers)[1]
+
+
+grid_full %<>% rename(Category_full = Category)
+
+
+grid_full %>% group_by(Category_full) %>% count()
+
+###################
+# SCENARIO 2: rarefied dataset (one jump per location)
+###################
+
+# Put jumpers into the grid data and complete with the rest
+grid_rarefied <- grid_data %>% left_join(jumpers %>% filter(Rarefied == TRUE) %>% 
+                                           select(latitude_rounded, longitude_rounded, bio_year, Category, Status)) %>% 
+  mutate(Category = ifelse(is.na(Category), Category_out, Category)) %>% 
+  select(-Category_out)
+
+# Verify we still have the right number of jumps
+dim(grid_rarefied %>% filter(Category == "Jumpers"))[1] == dim(jumpers %>% filter(Rarefied == TRUE))[1]
+
+grid_rarefied %<>% rename(Category_rarefied = Category) 
+
+grid_rarefied %>% group_by(Category_rarefied) %>% count()
+
+
+# Reassemble in one long dataset with one column for the type of dataset
+slf_cat <- merge(grid_full, grid_rarefied)
+
+write.csv(slf_cat, file.path(here(), "exported-data", "slf_cat.csv"), row.names = F)
+```
+
+
+# 4. Create dataset "as of today"
+That way, each point is only counted once (and cannot be both in negatives and positives for example)
+```{r generate a grid of unique points for situation as of 2020}
+
+slf_cat <- read.csv(file.path(here(), "exported-data", "slf_cat.csv"))
+dim(slf_cat)
+
+# Show the number of duplicates
+slf_cat %>% group_by(latitude_rounded, longitude_rounded) %>% count() %>% 
+  group_by(n) %>% count(n)
+
+slf_cat$Category_rarefied <- as.factor(slf_cat$Category_rarefied)
+levels(slf_cat$Category_rarefied)
+slf_cat$Category_rarefied <- factor(slf_cat$Category_rarefied, levels = c("Negatives", "Diffusers", "Jumpers"))
+slf_cat$Category_full <- factor(slf_cat$Category_full, levels = c("Negatives", "Diffusers", "Jumpers"))
+levels(slf_cat$Category_full)
+
+slf_cat <- grid_data
+
+slf_uptodate <- slf_cat %>% mutate(Category_rare_num = as.numeric(Category_rarefied),
+                    Category_full_num = as.numeric(Category_full)) %>%  
+  group_by(latitude_rounded, longitude_rounded, DistToRail, DistToRoad, DistToAirport, DistToPort) %>% 
+  summarize(Category_rare_max = max(Category_rare_num),
+            Category_full_max = max(Category_full_num)) %>% 
+  mutate(Category_rare = recode(Category_rare_max, "1" = "Negatives", "2" = "Diffusers", "3" = "Jumpers"),
+         Category_full = recode(Category_full_max, "1" = "Negatives", "2" = "Diffusers", "3" = "Jumpers"))
+  
+
+dim(slf_uptodate) #43,801
+head(slf_uptodate[7:10])
+
+write.csv(slf_uptodate, file.path(here(), "exported-data", "slf_uptodate.csv"), row.names=F)
+
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
+dim(slf_uptodate)
+
+slf_uptodate %<>% mutate(Status = ifelse(Category_full == "Negatives", "Negative surveys", "Positive surveys"))
+slf_uptodate$Status <- as.factor(slf_uptodate$Status)
+slf_uptodate$Status <- factor(slf_uptodate$Status, levels = c("Negative surveys", "Positive surveys"))
+
+dim(slf_uptodate %>% filter(Status == "Positive surveys"))[1]/dim(slf_uptodate)[1] #13.5
+
+
+# Big map
+surveys <- ggplot(data = states) +
+  geom_sf(fill = "white") +
+  geom_point(data = grid_data,
+             aes(x = longitude_rounded, y = latitude_rounded), col = "gray", size = 1) +
+  geom_sf(data = states, fill = "white", alpha = 0) +
+  labs(x = "Longitude", y = "Latitude") +
+  # coord_sf(xlim = c(-90, -70), ylim = c(33, 45)) +
+  theme_classic() +
+  theme(legend.position="bottom", legend.key = element_rect(fill = "white", colour = NA)) 
+surveys
+
+ggsave(file.path(here(), "figures", "points_all.jpg"), surveys, width = 6, height = 6)
+
+# Zoomed map
+surveys <- ggplot(data = states) +
+  geom_sf(fill = "white") +
+  geom_point(data = slf_uptodate %>% filter(Status == "Negative surveys"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = Status), size = 0.01) +
+    geom_sf(data = hull, alpha = 0, fill = "white") +
+    geom_point(data = slf_uptodate %>% filter(Status == "Positive surveys"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = Status), size = 0.1) +
+  scale_color_manual(values = c("gray", "black")) +
+  geom_sf(data = states, fill = "white", alpha = 0) +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-83, -72), ylim = c(37, 44)) +
+  theme_classic() +
+  theme(legend.position="bottom", legend.key = element_rect(fill = "white", colour = NA)) 
+
+surveys
+
+ggsave(file.path(here(), "figures", "points2.jpg"), surveys, width = 6, height = 6)
+```
+
+
+# 6. Closest transport for each point? 
+What is the repartition of the most common closest POI?
+```{r closest poi}
+
+library(reshape2)
+
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
+dim(slf_uptodate) #43,801 rows
+
+#Modify dataset to get distribution of distances with a column for the type of distance (Road, Rail...), and one column for the type of dataset (Full or Rarefied)
+
+#Keep only road and rail as they are the only significant
+slf_uptodate %<>% select(-DistToPort, -DistToAirport)
+
+slf_uptodate_long <- slf_uptodate %>% 
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+
+
+#### Rarefied dataset
+# Compute which transport is the closer to the point
+slf_min <- slf_uptodate_long %>% group_by(latitude_rounded, longitude_rounded, Category_rare) %>% 
+  summarise(distmin = DistanceType[which.min(DistanceValue)])
+prop_rare <- slf_min %>% group_by(Category_rare, distmin) %>% summarise(n = n())
+
+chisq.table <- dcast(Category_rare ~ distmin, data = prop_rare)
+chisq.table[is.na(chisq.table)] <- 0
+
+
+# Test (with roads and rails only)
+results <- chisq.test(chisq.table[c(1,3),2:3])
+#Diff-Jump: X-squared = 2.2932e-26, df = 1, p-value = 1
+#Diff-Neg: X-squared = 140.11, df = 1, p-value < 2.2e-16
+round(results$expected,0)
+results$observed
+
+round(results$observed[1,]/sum(results$observed[1,]),2)
+round(results$observed[2,]/sum(results$observed[2,]),2)
+
+# Test (with airports and ports)
+results <- chisq.test(chisq.table[c(1,3),2:5])
+#Diff-Jump: X-squared = 0.58939, df = 3, p-value = 0.8989
+#Diff-Neg: X-squared = 171.22, df = 6, p-value < 2.2e-16
+#Diff-Neg, chull: X-squared = 134.95, df = 3, p-value < 2.2e-16
+round(results$expected,0)
+results$observed
+
+round(results$observed[1,]/sum(results$observed[1,]),2)
+round(results$observed[2,]/sum(results$observed[2,]),2)
+
+
+totals <- prop_rare %>% group_by(Category_rare) %>% summarise(total = sum(n))
+chisq.table %>% left_join(totals) %>% 
+  mutate(prctDistToRoad = round(DistToRoad/total,2),
+                       prctDistToRail = round(DistToRail/total,2),
+                       prctDistToAirport = round(DistToAirport/total,2),
+                       prctDistToPort = round(DistToPort/total,2))
+
+chisq.table
+
+
+slf_min$Category_rare <- factor(slf_min$Category_rare, levels = c("Jumpers", "Diffusers", "Negatives"))
+levels(slf_uptodate$Category_rare)
+
+# Plot it
+categ_representation <- ggplot(slf_min) +
+  # order bars by increasing order
+  geom_bar(aes(y = reorder(distmin, distmin, 
+                     function(y) - length(y)), 
+               fill = Category_rare), position = position_dodge()) +
+  ylab("Nearest transport infrastructure") +
+  xlab("Number of surveys per category") +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_y_discrete(labels = c("Major road", "Rail", "Port", "Airport")) +
+  facet_wrap(~Category_rare, ncol = 3, scales = "free_x") +
+  theme_classic()
+
+ggsave(file.path(here(), "figures", "vignette_transports", "category_representation_rarefied_chull.jpg"), categ_representation, width = 10, height = 6)
+
+
+
+
+#### Full dataset
+# Compute which transport is the closer to the point
+slf_min <- slf_uptodate_long %>% group_by(latitude_rounded, longitude_rounded, Category_full) %>% 
+  summarise(distmin = DistanceType[which.min(DistanceValue)])
+prop_full <- slf_min %>% group_by(Category_full, distmin) %>% summarise(n = n())
+
+chisq.table <- dcast(Category_full ~ distmin, data = prop_full)
+chisq.table[is.na(chisq.table)] <- 0
+
+# Test
+results <- chisq.test(chisq.table[c(1,3),2:3])
+#Diff-Jump: X-squared = 8.8021, df = 1, p-value = 0.003009
+#Diff-Neg: X-squared = 127.81, df = 1, p-value < 2.2e-16
+round(results$expected,0)
+results$observed
+
+round(results$observed[1,]/sum(results$observed[1,]),2)
+round(results$observed[2,]/sum(results$observed[2,]),2)
+
+totals <- prop_full %>% group_by(Category_full) %>% summarise(total = sum(n))
+chisq.table %>% left_join(totals) %>% 
+  mutate(prctDistToRoad = round(DistToRoad/total,2),
+                       prctDistToRail = round(DistToRail/total,2),
+                       prctDistToAirport = round(DistToAirport/total,2),
+                       prctDistToPort = round(DistToPort/total,2))
+
+
+slf_min$Category_full <- factor(slf_min$Category_full, levels = c("Jumpers", "Diffusers", "Negatives"))
+levels(slf_min$Category_full)
+
+# Plot it
+categ_representation <- ggplot(slf_min) +
+  # order bars by increasing order
+  geom_bar(aes(y = reorder(distmin, distmin, 
+                     function(y) - length(y)),
+               fill = Category_full), position = position_dodge()) +
+  ylab("Nearest transport infrastructure") +
+  xlab("Number of surveys per category") +
+    scale_fill_brewer(palette = "Dark2") +
+  scale_y_discrete(labels = c("Major road", "Rail", "Port", "Airport")) +
+  facet_wrap(~Category_full, ncol = 3, scales = "free_x") +
+  theme_classic()
+
+ggsave(file.path(here(), "figures", "vignette_transports", "category_representation_full_chull.jpg"), categ_representation, width = 10, height = 6)
+```
+
+
+
+# 5. Check for differences in observed means between categories of SLF
+
+## Calculate observed values
+```{r distance of jumpers to transport infrastructures}
+
+# slf_cat <- read.csv(file.path(here(), "exported-data", "slf_cat.csv"))
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
+slf_chull <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
+
+slf_chull %>% filter(Category_full == "Jumpers") %>% 
+  summarise(maxDistToRail = max(DistToRail)/1000,
+            maxDistToRoad = max(DistToRoad)/1000,
+            DistToRail95 = quantile(DistToRail, 0.95)/1000,
+            DistToRoad95 = quantile(DistToRoad, 0.95)/1000,
+            DistToRail75 = quantile(DistToRail, 0.75)/1000,
+            DistToRoad75 = quantile(DistToRoad, 0.75)/1000)
+
+
+slf_chull %>% filter(Category_rare == "Jumpers") %>% 
+  summarise(maxDistToRail = max(DistToRail)/1000,
+            maxDistToRoad = max(DistToRoad)/1000,
+            DistToRail95 = quantile(DistToRail, 0.95)/1000,
+            DistToRoad95 = quantile(DistToRoad, 0.95)/1000,
+            DistToRail75 = quantile(DistToRail, 0.75)/1000,
+            DistToRoad75 = quantile(DistToRoad, 0.75)/1000)
+
+
+
+slf_chull %>% filter(Category_full == "Jumpers") %>% 
+  summarise(qtRail = quantile(DistToRail, 0.95),
+            qtRoad = quantile(DistToRoad, 0.95),
+            qtAirport = quantile(DistToAirport, 0.95),
+            qtPort = quantile(DistToPort, 0.95))
+
+
+
+
+# Summary for Category_full
+slf_chull %>% group_by(Category_full) %>%
+  summarise(medianDistToRail = median(DistToRail), 
+            medianDistToRoad = median(DistToRoad),
+            medianDistToPort = median(DistToPort)/1000,
+            medianDistToAirport = median(DistToAirport)/1000,
+            meanDistToRail = mean(DistToRail), 
+            meanDistToRoad = mean(DistToRoad),
+            meanDistToPort = mean(DistToPort)/1000,
+            meanDistToAirport = mean(DistToAirport)/1000)
+
+# Summary for Category_rare
+slf_uptodate %>% group_by(Category_rare) %>%
+  summarise(medianDistToRail = median(DistToRail),
+            medianDistToRoad = median(DistToRoad),
+            medianDistToPort = median(DistToPort)/1000,
+            medianDistToAirport = median(DistToAirport)/1000,
+            meanDistToRail = mean(DistToRail), 
+            meanDistToRoad = mean(DistToRoad),
+            meanDistToPort = mean(DistToPort)/1000,
+            meanDistToAirport = mean(DistToAirport)/1000)
+
+
+
+
+
+```
+
+
+## Box plot
+
+We have a first look at differences in distances to transport infrastructures between categories (Figure 1). Note that the y axis is truncated to show more clearly the boxes. Refer to the previous section to get the quartiles and maximum values of the variables. 
+Jumpers seem to be closer to rail and roads than the other two categories, but there is no visible difference regarding the distance to airports. Diffusers are intermediate between jumpers and undetected for roads and railroads. 
+
+With slf_cat (DEPRECATED)
+```{r plot histogram of distances between jumpers, diffusers, undetected, fig.height=5, fig.width = 6, fig.cap="Distance of jumpers, diffusers and non-detections to railroads (top), roads (middle), and airports (bottom). The y axis is truncated to better show the boxes. Refer to section 1 for variables summary."}
+
+#Modify dataset to get distribution of distances with a column for the type of distance (Road, Rail...), and one column for the type of dataset (Full or Rarefied)
+slf_cat_long <- slf_cat %>% 
+  select(-DistToIntro) %>% 
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+
+# Order the variables (for plots)
+unique(slf_cat_long$Category_full)
+slf_cat_long$Category_full <- factor(slf_cat_long$Category_full, levels = c("Jumpers", "Diffusers", "Negatives"))
+unique(slf_cat_long$Category_rarefied)
+
+slf_cat_long$Category_rarefied <- factor(slf_cat_long$Category_rarefied, levels = c("Jumpers", "Diffusers", "Negatives"))
+slf_cat_long$DistanceType <- factor(slf_cat_long$DistanceType, levels = c("DistToRoad", "DistToRail", "DistToAirport", "DistToPort"))
+
+slf_cat_long %>% group_by(Category_rarefied) %>% count()
+
+# Plot distances (full dataset)
+transport_bp <- ggplot(slf_cat_long, aes(y = DistanceValue/1000, x = Category_full)) + 
+  geom_boxplot(aes(fill = Category_full), show.legend = F) +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~DistanceType, scales = "free_y", ncol = 4, 
+             labeller = labeller(DistanceType = 
+    c("DistToAirport" = "Airport",
+      "DistToPort" = "Port",
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road"))) +
+  # coord_cartesian(ylim=c(0, 30000)) +
+  xlab("Category") + ylab("Distance to the nearest... (km)") +
+  theme_classic()
+
+# ggsave(file.path(here(), "figures", "vignette_transports", "transport_full_old.jpg"), transport_bp, width = 10, height = 3)
+
+
+# Plot distances (rarefied dataset)
+transport_bp <- ggplot(slf_cat_long, aes(y = DistanceValue/1000, x = Category_rarefied)) + 
+  geom_boxplot(aes(fill = Category_rarefied), alpha = 0.5, show.legend = F) +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~DistanceType, scales = "free_y", ncol = 4,
+              labeller = labeller(DistanceType =
+    c("DistToAirport" = "Airport",
+      "DistToPort" = "Port",
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road"))) +
+  xlab("Category") + ylab("Distance to the nearest... (km)") +
+  theme_classic()
+
+# ggsave(file.path(here(), "figures", "vignette_transports", "transport_rarefied_old.jpg"), transport_bp, width = 10, height = 3)
+
+
+
+
+
+# Plot distances (full dataset) per year
+transport_bp <- ggplot(slf_cat_long %>% filter(bio_year %in% c(2017:2020)), aes(y = DistanceValue/1000, x = Category_full)) + 
+  geom_boxplot(aes(fill = Category_full), show.legend = F) +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~DistanceType + bio_year, scales = "free_y", ncol = 4, 
+             labeller = labeller(DistanceType = 
+    c("DistToAirport" = "Airport",
+      "DistToPort" = "Port",
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road"))) +
+  # coord_cartesian(ylim=c(0, 30000)) +
+  xlab("Category") + ylab("Distance to the nearest... (km)") +
+  theme_classic()
+
+ggsave(file.path(here(), "figures", "vignette_transports", "transport_full_peryear.jpg"), transport_bp, width = 12, height = 10)
+
+
+# # Plot distances 
+# rail_bp <- ggplot(grid_S8GS15, aes(y = DistToRail, x = Category)) + 
+#   geom_boxplot() +
+#   coord_cartesian(ylim=c(0, 30000)) +
+#   theme_classic() +
+#   labs(x=NULL) +
+#   ylab("Nearest railroad (m)")
+# 
+# road_bp <- ggplot(grid_S8GS15, aes(y = DistToRoad, x = Category)) + 
+#   geom_boxplot() +
+#   coord_cartesian(ylim=c(0, 7500)) +
+#   theme_classic() +
+#   labs(x=NULL) +
+#   ylab("Nearest major road (m)")
+# 
+# airport_bp <- ggplot(grid_S8GS15, aes(y = DistToAirport, x = Category)) + 
+#   geom_boxplot() +
+#   coord_cartesian(ylim=c(0, 30000)) +
+#   theme_classic() +
+#   labs(x=NULL) +
+#   ylab("Nearest airport (m)")
+# 
+# transport_bp <- grid.arrange(rail_bp, road_bp, airport_bp, nrow = 3)
+# ggsave("../figures/vignette_transports/transport_bp_DP12GS15reduced.jpg", transport_bp, width = 6, height = 6)
+```
+
+
+With slf_uptodate
+```{r plot histogram of distances between jumpers, diffusers, undetected, fig.height=5, fig.width = 6, fig.cap="Distance of jumpers, diffusers and non-detections to railroads (top), roads (middle), and airports (bottom). The y axis is truncated to better show the boxes. Refer to section 1 for variables summary."}
+
+slf_chull <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
+
+slf_uptodate <- slf_chull
+#Modify dataset to get distribution of distances with a column for the type of distance (Road, Rail...), and one column for the type of dataset (Full or Rarefied)
+slf_uptodate_long <- slf_uptodate %>% 
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+
+# Order the variables (for plots)
+unique(slf_uptodate_long$Category_full)
+slf_uptodate_long$Category_full <- factor(slf_uptodate_long$Category_full, levels = c("Jumpers", "Diffusers", "Negatives"))
+
+unique(slf_uptodate_long$Category_rare)
+slf_uptodate_long$Category_rare <- factor(slf_uptodate_long$Category_rare, levels = c("Jumpers", "Diffusers", "Negatives"))
+
+slf_uptodate_long$DistanceType <- factor(slf_uptodate_long$DistanceType, levels = c("DistToRoad", "DistToRail", "DistToAirport", "DistToPort"))
+
+slf_uptodate_long %>% group_by(Category_rare, DistanceType) %>% count()
+
+# Plot distances (full dataset)
+transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Category_full)) + 
+  geom_boxplot(aes(fill = Category_full), outlier.shape = NA, show.legend = F) +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~DistanceType, scales = "free_y", ncol = 4, 
+             labeller = labeller(DistanceType = 
+    c("DistToAirport" = "Airport",
+      "DistToPort" = "Port",
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road"))) +
+  coord_cartesian(ylim=c(0, 16)) +
+  xlab("Category") + ylab("Distance to the nearest... (km)") +
+  theme_classic()
+
+transport_bp
+
+ggsave(file.path(here(), "figures", "vignette_transports", "transport_chull_full_zoomed.jpg"), transport_bp, width = 10, height = 3)
+
+# Plot distances (rarefied dataset)
+transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Category_rare)) + 
+  geom_boxplot(aes(fill = Category_rare), alpha = 0.5, show.legend = F) +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~DistanceType, scales = "free_y", ncol = 4,
+              labeller = labeller(DistanceType =
+    c("DistToAirport" = "Airport",
+      "DistToPort" = "Port",
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road"))) +
+  xlab("Category") + ylab("Distance to the nearest... (km)") +
+  theme_classic()
+
+ggsave(file.path(here(), "figures", "vignette_transports", "transport_chull_rarefied.jpg"), transport_bp, width = 10, height = 3)
+
+```
+
+
+## Statistical test 
+
+Test of the difference of the means between jumpers, diffusers and non-detections
+
+#### Test autocorrelation
+``` {r test autocorrelation}
+
+# Detect spatial autocorrelation in the datasets 
+library(ape)
+
+# Start with the rarefied dataset
+Jumpers <- slf_uptodate %>% filter(Category_rare == "Jumpers")
+
+# Calculate the matrix of coordinates
+distLonLat <- as.matrix(dist(cbind(Jumpers$longitude_rounded, Jumpers$latitude_rounded)))
+distLonLat.inv <- 1/distLonLat
+diag(distLonLat.inv) <- 0
+
+Moran.I(Jumpers$DistToRail, distLonLat.inv)
+# $observed: # [1] 0.01799204
+# $expected: # [1] -0.02439024
+# $sd: # [1] 0.03009262
+# $p.value: # [1] 0.1590143
+
+Moran.I(Jumpers$DistToRoad, distLonLat.inv)
+# $observed: # [1] -0.01167073
+# $expected: # [1] -0.02439024
+# $sd: # [1] 0.0298196
+# $p.value: # [1] 0.669708
+
+Moran.I(Jumpers$DistToAirport, distLonLat.inv)
+# $observed: # [1] 0.01137238
+# $expected: # [1] -0.02439024
+# $sd: # [1] 0.03111448
+# $p.value: # [1] 0.2503958
+
+Moran.I(Jumpers$DistToPort, distLonLat.inv)
+# $observed: # [1] 0.2927524
+# $expected: # [1] -0.02439024
+# $sd: # [1] 0.03151818
+# $p.value: # [1] 0 ***
+
+
+# Continue with the full dataset
+Jumpers <- slf_uptodate %>% filter(Category_full == "Jumpers")
+
+distLonLat <- as.matrix(dist(cbind(Jumpers$longitude_rounded, Jumpers$latitude_rounded)))
+distLonLat.inv <- 1/distLonLat
+diag(distLonLat.inv) <- 0
+
+Moran.I(Jumpers$DistToRail, distLonLat.inv)
+# $observed: # [1] 0.3414846
+# $expected: # [1] -0.007246377
+# $sd: # [1] 0.02978898
+# $p.value: # [1] 0 ***
+
+Moran.I(Jumpers$DistToRoad, distLonLat.inv)
+# $observed: # [1] 0.1339166
+# $expected: # [1] -0.007246377
+# $sd: # [1] 0.03139476
+# $p.value: # [1] 6.911767e-06 ***
+
+Moran.I(Jumpers$DistToAirport, distLonLat.inv)
+# $observed: # [1] 0.6342668
+# $expected: # [1] -0.007246377
+# $sd: # [1] 0.03237369
+# $p.value: # [1] 0 ***
+
+Moran.I(Jumpers$DistToPort, distLonLat.inv)
+# $observed: # [1] 0.542374
+# $expected: # [1] -0.007246377
+# $sd: # [1] 0.03225233
+# $p.value: # [1] 0 ***
+
+
+# Now do the same for diffusers
+# Detect spatial autocorrelation in the datasets
+Diffusers <- slf_uptodate %>% filter(Category_rare == "Diffusers")
+
+distLonLat <- as.matrix(dist(cbind(Diffusers$longitude_rounded, Diffusers$latitude_rounded)))
+distLonLat.inv <- 1/distLonLat
+diag(distLonLat.inv) <- 0
+
+Moran.I(Diffusers$DistToRail, distLonLat.inv) #error
+# $observed = 0.08669873
+# $expected = -0.0001705611
+# $sd = 0.0004545851
+# $p.value = 0
+
+Moran.I(Diffusers$DistToRoad, distLonLat.inv)
+# $observed = 0.08863891
+# $expected = -0.0001705611
+# $sd = 0.0004544255
+# $p.value = 0
+
+Moran.I(Diffusers$DistToAirport, distLonLat.inv)
+# $observed = 0.2838551
+# $expected = -0.0001705611
+# $sd = 0.0004547081
+# $p.value = 0
+
+Moran.I(Diffusers$DistToPort, distLonLat.inv)
+# $observed = 0.3921594
+# $expected = -0.0001705611
+# $sd = 0.0004547183
+# $p.value = 0
+```
+
+#### Test data shape
+```{r test data variance and shape}
+
+# Look at the symmetry of the distributions and shapes between groups
+ggplot(slf_uptodate, aes(x = DistToRoad)) + 
+  geom_histogram() +
+  facet_wrap(~Category_rare, scales = "free") +
+  theme_classic() 
+# Distributions are similar but variance and sample sizes are very different (example for road)
+
+# Test heteroscedasticity
+bartlett.test(DistToRoad ~ Category_rare, data = slf_uptodate)
+# Bartlett's K-squared = 65.106, df = 2, p-value = 7.283e-15
+
+bartlett.test(DistToRail ~ Category_rare, data = slf_uptodate)
+# Bartlett's K-squared = 2731.7, df = 2, p-value < 2.2e-16
+
+bartlett.test(DistToAirport ~ Category_rare, data = slf_uptodate)
+# Bartlett's K-squared = 591.7, df = 2, p-value < 2.2e-16
+
+bartlett.test(DistToPort ~ Category_rare, data = slf_uptodate)
+# Bartlett's K-squared = 2516, df = 2, p-value < 2.2e-16
+
+# All variables are heteroskedastic.
+```
+
+#### Kruskal Wallis test (DEPRECATED)
+```{r KW test}
+
+# The distance to the nearest railroad is not normally distributed for each group, and the variance is not equal between groups. There is also a large difference in sample sizes (75, 5000 and 40000). We use a Kruskal-Wallis test to test for the stochastic dominance of a group over another one. 
+
+# The Kruskal-Wallis one-way ANOVA is a non-parametric method for comparing k independent samples. It is roughly equivalent to a parametric one way ANOVA  with the data replaced by their ranks. When observations represent very different distributions, it should be regarded as a test of dominance between distributions. If the original observations are identically distributed, it can be interpreted as testing for a difference between medians. If observations are also assumed to be distributed symmetrically, it can be interpreted as testing for a difference between means. There is considerable confusion in the literature over this matter. Some authors state unambiguously that there are no distributional assumptions, others that the homogeneity of variances assumption applies just as for parametric ANOVA. The confusion results from how you interpret a significant result.  If you wish to compare medians or means, then the Kruskal-Wallis test also assumes that observations in each group are identically and independently distributed apart from location. If you can accept inference in terms of dominance of one distribution over another, then there are indeed no distributional assumptions.
+
+# Non-parametric analysis of variance is used almost as widely and frequently as parametric ANOVA. Its use is usually justified on the basis that assumptions for parametric ANOVA are not met. This can lead to the over-use of Kruskal-Wallis ANOVA, because in many cases a logarithmic transformation  would normalize the errors. If conditions are met for a parametric test, then using a non-parametric test results in an unwarranted loss of power.  The Kruskal-Wallis test is a better option only if the assumption of (approximate) normality of observations cannot be met, or if one is analyzing an ordinal variable.
+
+library(FSA)
+
+# Rarefied dataset, each distance
+kruskal.test(DistToRail ~ Category_rare, data = slf_uptodate)
+# Kruskal-Wallis chi-squared = 366.3, df = 2, p-value < 2.2e-16
+dunnTest(DistToRail ~ Category_rare, data = slf_uptodate)
+#              Comparison          Z       P.unadj         P.adj
+# 1   Diffusers - Jumpers   2.495603 1.257434e-02 1.257434e-02 *
+# 2 Diffusers - Negatives -18.745070 2.123937e-78 6.371811e-78 ***
+# 3   Jumpers - Negatives  -4.048985 5.144027e-05 1.028805e-04 ***
+
+
+
+
+kruskal.test(DistToRoad ~ Category_rare, data = slf_uptodate)
+# Kruskal-Wallis chi-squared = 39.068, df = 2, p-value = 3.284e-09
+
+dunnTest(DistToRoad ~ Category_rare, data = slf_uptodate)
+#              Comparison          Z      P.unadj        P.adj
+# 1   Diffusers - Jumpers  2.210973 2.703772e-02 5.407545e-02 
+# 2 Diffusers - Negatives  5.991065 2.084712e-09 6.254137e-09 ***
+# 3   Jumpers - Negatives -1.722264 8.502172e-02 8.502172e-02 
+
+
+
+
+kruskal.test(DistToAirport ~ Category_rare, data = slf_uptodate)
+# Kruskal-Wallis chi-squared = 143.29, df = 2, p-value < 2.2e-16
+
+dunnTest(DistToAirport ~ Category_rare, data = slf_uptodate)
+#              Comparison            Z       P.unadj         P.adj
+# 1   Diffusers - Jumpers  -0.3096795 7.568047e-01 7.568047e-01 
+# 2 Diffusers - Negatives -11.9572092 5.952913e-33 1.785874e-32 ***
+# 3   Jumpers - Negatives  -0.6762934 4.988544e-01 9.977087e-01
+
+
+
+kruskal.test(DistToPort ~ Category_rare, data = slf_uptodate)
+# Kruskal-Wallis chi-squared = 1011.5, df = 2, p-value < 2.2e-16
+
+dunnTest(DistToPort ~ Category_rare, data = slf_uptodate)
+#             Comparison          Z      P.unadj        P.adj
+# 1   Diffusers - Jumpers  -3.2471052  1.165853e-03  2.331706e-03 **
+# 2 Diffusers - Negatives -31.7904181 8.781147e-222 2.634344e-221 ***
+# 3   Jumpers - Negatives   0.6319712  5.274057e-01  5.274057e-01 
+
+
+
+
+# Full dataset
+# Kruskal-Wallis test
+kruskal.test(DistToRail ~ Category_full, data = slf_uptodate)
+# Kruskal-Wallis chi-squared = 411.45, df = 2, p-value < 2.2e-16
+
+dunnTest(DistToRail ~ Category_full, data = slf_uptodate)
+#              Comparison          Z       P.unadj         P.adj
+# 1   Diffusers - Jumpers   7.167938 7.613565e-13 7.613565e-13 ***
+# 2 Diffusers - Negatives -17.865271 2.198628e-71 6.595884e-71 ***
+# 3   Jumpers - Negatives  -9.925921 3.211228e-23 6.422455e-23 ***
+
+
+
+
+kruskal.test(DistToRoad ~ Category_full, data = slf_uptodate)
+# Kruskal-Wallis chi-squared = 66.833, df = 2, p-value = 3.072e-15
+
+dunnTest(DistToRoad ~ Category_full, data = slf_uptodate)
+#              Comparison          Z      P.unadj        P.adj
+# 1   Diffusers - Jumpers  5.714295 1.101600e-08 2.203199e-08 ***
+# 2 Diffusers - Negatives  6.548477 5.812673e-11 1.743802e-10 ***
+# 3   Jumpers - Negatives -4.775407 1.793443e-06 1.793443e-06 ***
+
+
+
+
+kruskal.test(DistToAirport ~ Category_full, data = slf_uptodate)
+# Kruskal-Wallis chi-squared = 147.97, df = 2, p-value < 2.2e-16
+
+dunnTest(DistToAirport ~ Category_full, data = slf_uptodate)
+#              Comparison            Z       P.unadj         P.adj
+# 1   Diffusers - Jumpers  -2.1863528 2.878981e-02 5.757962e-02
+# 2 Diffusers - Negatives -12.1499530 5.739856e-34 1.721957e-33 ***
+# 3   Jumpers - Negatives   0.3716676 7.101403e-01 7.101403e-01
+
+
+
+kruskal.test(DistToPort ~ Category_full, data = slf_uptodate)
+# Kruskal-Wallis chi-squared = 1093.1, df = 2, p-value < 2.2e-16
+
+dunnTest(DistToPort ~ Category_full, data = slf_uptodate)
+#             Comparison          Z      P.unadj        P.adj
+# 1   Diffusers - Jumpers  -9.599588  8.026490e-22  1.605298e-21 ***
+# 2 Diffusers - Negatives -32.627567 1.667561e-233 5.002684e-233 ***
+# 3   Jumpers - Negatives   4.758620  1.949206e-06  1.949206e-06 ***
+
+```
+
+
+#### Linear models slf_cat (DEPRECATED)
+LM w/o ac correction
+```{r models without autocorrelation coefficient}
+
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
+dim(slf_uptodate)
+
+# We want jumpers as the reference here. UPDATE: no we don't
+# slf_uptodate <- within(slf_uptodate, Category_rarefied <- relevel(Category_rarefied, ref = "Jumpers"))
+slf_uptodate$Category_rarefied <- as.factor(slf_uptodate$Category_rarefied)
+
+mod <- lm(DistToRail ~ Category_rarefied, data = slf_uptodate)
+plotresid(mod)
+# Residuals are not normal, we transform the variable
+
+modRail <- lm(log(DistToRail+1) ~ Category_rarefied, data = slf_uptodate) #### RERUN THIS MODEL
+plotresid(mod)
+# Residuals are a little bit better...
+summary(modRail)
+#                        Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             7.21199    0.01930 373.665  < 2e-16 ***
+# Category_fullJumpers   -1.07828    0.13745  -7.845  4.4e-15 ***
+# Category_fullNegatives  0.33298    0.02056  16.192  < 2e-16 ***
+# There is a difference for jumpers-diffusers and diffusers-negatives.
+
+
+mod <- lm(DistToRoad ~ Category_rarefied, data = slf_uptodate)
+plotresid(mod)
+# Residuals are not normal
+
+modRoad <- lm(log(DistToRoad+1) ~ Category_rarefied, data = slf_uptodate)
+plotresid(modRoad)
+summary(modRoad)
+#                            Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                 6.16958    0.01955 315.508  < 2e-16 ***
+# Category_rarefiedJumpers   -0.56448    0.25333  -2.228   0.0259 *  
+# Category_rarefiedNegatives -0.08682    0.02085  -4.164 3.14e-05 ***
+# There is a difference for jumpers-diffusers and diffusers-negatives.
+
+
+modAirport <- lm(DistToAirport ~ Category_rarefied, data = slf_uptodate)
+plotresid(modAirport)
+# Residuals are not so bad - better than with the log transformation
+summary(modAirport)
+#                            Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                 31965.2      240.1 133.118   <2e-16 ***
+# Category_rarefiedJumpers     1194.5     3110.9   0.384    0.701    
+# Category_rarefiedNegatives   3659.1      256.1  14.290   <2e-16 ***
+# There is no difference between jumpers-diffusers, only diffusers-negative
+
+
+modPort <- lm(DistToPort ~ Category_rarefied, data = slf_uptodate)
+plotresid(modPort)
+# Residuals are not so bad - better than with the log transformation
+summary(modPort)
+#                            Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                 54246.5      724.1   74.92  < 2e-16 ***
+# Category_rarefiedJumpers    29731.7     9380.4    3.17  0.00153 ** 
+# Category_rarefiedNegatives  27010.6      772.1   34.98  < 2e-16 *** 
+# There is a difference for jumpers-diffusers and diffusers-negatives.
+# Note that here, differences are not in the expected order!
+
+```
+
+
+Same with category full
+```{r models without autocorrelation coefficient}
+slf_cat <- read.csv(file.path(here(), "exported-data", "slf_cat.csv"))
+head(slf_cat)
+slf_cat$Category_full <- as.factor(slf_cat$Category_full)
+
+mod <- lm(DistToRail ~ Category_full, data = slf_cat)
+plotresid(mod)
+# Residuals are not normal, we transform the variable
+
+modRail <- lm(log(DistToRail+1) ~ Category_full, data = slf_cat)
+plotresid(modRail)
+summary(modRail)
+# Coefficients:
+#                        Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             7.21199    0.01930 373.665  < 2e-16 ***
+# Category_fullJumpers   -1.07828    0.13745  -7.845  4.4e-15 ***
+# Category_fullNegatives  0.33298    0.02056  16.192  < 2e-16 ***
+
+
+mod <- lm(DistToRoad ~ Category_full, data = slf_cat)
+plotresid(mod)
+# Residuals are not normal
+
+modRoad <- lm(log(DistToRoad+1) ~ Category_full, data = slf_cat)
+plotresid(modRoad)
+summary(modRoad)
+# Coefficients:
+#                        Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             6.18112    0.01969 313.967  < 2e-16 ***
+# Category_fullJumpers   -0.75587    0.14020  -5.391 7.02e-08 ***
+# Category_fullNegatives -0.09836    0.02098  -4.689 2.75e-06 ***
+
+
+modAirport <- lm(DistToAirport ~ Category_full, data = slf_cat)
+plotresid(modAirport)
+# Residuals are not so bad - better than with the log transformation
+summary(modAirport)
+#                        Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             31900.2      241.8 131.929   <2e-16 ***
+# Category_fullJumpers     3655.4     1721.9   2.123   0.0338 *  
+# Category_fullNegatives   3724.1      257.6  14.455   <2e-16 *** 
+
+
+modPort <- lm(DistToPort ~ Category_full, data = slf_cat)
+plotresid(modPort)
+# Residuals are not so bad - better than with the log transformation
+summary(modPort)
+#                        Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             53564.6      728.8  73.501   <2e-16 ***
+# Category_fullJumpers    43564.8     5189.7   8.395   <2e-16 ***
+# Category_fullNegatives  27692.5      776.5  35.664   <2e-16 *** 
+
+```
+
+
+Calculate autocorrelation coefficients
+```{r calculate the autocorrelation coefficient}
+#Make a matrix of coordinates 
+coords <- as.matrix(cbind(slf_cat$longitude_rounded,slf_cat$latitude_rounded))
+
+# compute the autocovariate based on the above distance and weight 
+ac_rail_lonlat <- autocov_dist(slf_cat$DistToRail, coords, nbs = 1, type = "inverse", longlat = T)
+ac_road_lonlat <- autocov_dist(slf_cat$DistToRoad, coords, nbs = 1, type = "inverse", longlat = T)
+ac_airport_lonlat <- autocov_dist(slf_cat$DistToAirport, coords, nbs = 1, type = "inverse", longlat = T)
+ac_port_lonlat <- autocov_dist(slf_cat$DistToPort, coords, nbs = 1, type = "inverse", longlat = T)
+
+ac_rail_lonlat <- read.csv(file.path(here(), "exported-data", "ac_rail.csv"))
+dim(slf_cat)[1] == dim(ac_rail_lonlat)[1]
+str(ac_rail_lonlat$x)
+slf_cat %<>% add_column(ac_rail = ac_rail_lonlat$x)
+
+ac_road_lonlat <- read.csv(file.path(here(), "exported-data", "ac_road.csv"))
+dim(slf_cat)[1] == dim(ac_road_lonlat)[1]
+str(ac_road_lonlat$x)
+slf_cat %<>% add_column(ac_road = ac_road_lonlat$x)
+
+ac_airport_lonlat <- read.csv(file.path(here(), "exported-data", "ac_airport.csv"))
+dim(slf_cat)[1] == dim(ac_airport_lonlat)[1]
+str(ac_airport_lonlat$x)
+slf_cat %<>% add_column(ac_airport = ac_airport_lonlat$x)
+
+ac_port_lonlat <- read.csv(file.path(here(), "exported-data", "ac_port.csv"))
+dim(slf_cat)[1] == dim(ac_port_lonlat)[1]
+str(ac_port_lonlat$x)
+slf_cat %<>% add_column(ac_port = ac_port_lonlat$x)
+```
+
+
+
+Linear models with ac correction 
+```{r glmm, echo = FALSE}
+slf_cat$Category_rarefied <- as.factor(slf_cat$Category_rarefied)
+# slf_cat <- within(slf_cat, Category_rarefied <- relevel(Category_rarefied, ref = "Jumpers"))
+
+modRail_ac <- lm(log(DistToRail+1) ~ Category_rarefied + ac_rail, data = slf_cat)
+plotresid(modRail_ac)
+summary(modRail_ac)
+# Coefficients:
+#                              Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                 6.804e+00  2.504e-02 271.735   <2e-16 ***
+# Category_rarefiedJumpers   -3.704e-01  2.474e-01  -1.498    0.134    
+# Category_rarefiedNegatives  5.011e-01  2.129e-02  23.541   <2e-16 ***
+# ac_rail                     5.640e-09  2.347e-10  24.033   <2e-16 ***
+  
+
+modRoad_ac <- lm(log(DistToRoad+1) ~ Category_rarefied + ac_road, data = slf_cat)
+plotresid(modRoad_ac)
+summary(modRoad_ac)
+# Coefficients:
+#                              Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                 5.736e+00  2.584e-02 222.024  < 2e-16 ***
+# Category_rarefiedJumpers   -3.068e-01  2.521e-01  -1.217    0.224    
+# Category_rarefiedNegatives  1.009e-01  2.201e-02   4.586 4.52e-06 ***
+# ac_road                     2.175e-08  8.540e-10  25.471  < 2e-16 ***
+
+
+modAirport_ac <- lm(DistToAirport ~ Category_rarefied + ac_airport, data = slf_cat)
+plotresid(modAirport_ac)
+summary(modAirport_ac)
+#                              Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                 3.469e+04  3.198e+02 108.479   <2e-16 ***
+# Category_rarefiedJumpers   -3.343e+02  3.109e+03  -0.108    0.914    
+# Category_rarefiedNegatives  2.523e+03  2.705e+02   9.326   <2e-16 ***
+# ac_airport                 -4.473e-06  3.473e-07 -12.881   <2e-16 ***
+
+
+
+modPort_ac <- lm(DistToPort ~ Category_rarefied + ac_port, data = slf_cat)
+plotresid(modPort_ac)
+summary(modPort_ac)
+#                             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                1.743e+04  8.393e+02  20.766  < 2e-16 ***
+# Category_rarefiedJumpers   4.624e+04  8.938e+03   5.173 2.31e-07 ***
+# Category_rarefiedNegatives 3.908e+04  7.521e+02  51.968  < 2e-16 ***
+# ac_port                    3.321e-05  4.313e-07  77.005  < 2e-16 ***
+```
+
+
+Same for category_full
+```{r glmm, echo = FALSE}
+slf_cat$Category_full <- as.factor(slf_cat$Category_full)
+# slf_cat <- within(slf_cat, Category_full <- relevel(Category_full, ref = "Jumpers"))
+
+
+modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail, data = slf_cat)
+plotresid(modRail_ac)
+summary(modRail_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             6.825e+00  2.520e-02 270.824  < 2e-16 ***
+# Category_fullJumpers   -9.072e-01  1.370e-01  -6.623 3.54e-11 ***
+# Category_fullNegatives  4.836e-01  2.143e-02  22.569  < 2e-16 ***
+# ac_rail                 5.570e-09  2.348e-10  23.726  < 2e-16 ***
+  
+
+modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road, data = slf_cat)
+plotresid(modRoad_ac)
+summary(modRoad_ac)
+# Coefficients:
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             5.748e+00  2.603e-02 220.872  < 2e-16 ***
+# Category_fullJumpers   -5.317e-01  1.397e-01  -3.805 0.000142 ***
+# Category_fullNegatives  9.087e-02  2.217e-02   4.099 4.15e-05 ***
+# ac_road                 2.159e-08  8.549e-10  25.250  < 2e-16 ***
+
+
+modAirport_ac <- lm(DistToAirport ~ Category_full + ac_airport, data = slf_cat)
+plotresid(modAirport_ac)
+summary(modAirport_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             3.462e+04  3.221e+02 107.507   <2e-16 ***
+# Category_fullJumpers    2.340e+03  1.723e+03   1.358    0.174    
+# Category_fullNegatives  2.578e+03  2.724e+02   9.463   <2e-16 ***
+# ac_airport             -4.443e-06  3.476e-07 -12.782   <2e-16 ***
+
+
+
+modPort_ac <- lm(DistToPort ~ Category_full + ac_port, data = slf_cat)
+plotresid(modPort_ac)
+summary(modPort_ac)
+#                         Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)            1.651e+04  8.435e+02   19.58   <2e-16 ***
+# Category_fullJumpers   5.513e+04  4.944e+03   11.15   <2e-16 ***
+# Category_fullNegatives 3.993e+04  7.562e+02   52.80   <2e-16 ***
+# ac_port                3.331e-05  4.310e-07   77.27   <2e-16 ***
+```
+
+
+
+#### Linear models per year (DEPRECATED)
+2017
+```{r glmm, echo = FALSE}
+
+library(spdep)
+
+### 2017
+slf_2017 <- slf_cat %>% filter(bio_year == 2017)
+coords_2017 <- as.matrix(cbind(slf_2017$longitude_rounded,slf_2017$latitude_rounded))
+
+# compute the autocovariate based on the above distance and weight 
+ac_rail_2017 <- autocov_dist(slf_2017$DistToRail, coords_2017, nbs = 100, type = "one", longlat = T)
+ac_road_2017 <- autocov_dist(slf_2017$DistToRoad, coords_2017, nbs = 100, type = "one", longlat = T)
+ac_airport_2017 <- autocov_dist(slf_2017$DistToAirport, coords_2017, nbs = 100, type = "one", longlat = T)
+ac_port_2017 <- autocov_dist(slf_2017$DistToPort, coords_2017, nbs = 100, type = "one", longlat = T)
+
+# Rail
+modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail_2017, data = slf_2017)
+plotresid(modRail_ac)
+summary(modRail_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             7.773e+00  1.152e-01  67.453  < 2e-16 ***
+# Category_fullJumpers    1.579e-02  9.186e-01   0.017  0.98629    
+# Category_fullNegatives  2.469e-02  8.795e-02   0.281  0.77890    
+# ac_rail_2017           -2.558e-08  8.459e-09  -3.024  0.00251 **
+  
+
+modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road_2017, data = slf_2017)
+plotresid(modRoad_ac)
+summary(modRoad_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             6.134e+00  1.082e-01  56.710  < 2e-16 ***
+# Category_fullJumpers    5.092e-01  9.143e-01   0.557    0.578    
+# Category_fullNegatives -4.337e-01  8.742e-02  -4.961 7.32e-07 ***
+# ac_road_2017            1.506e-07  2.950e-08   5.106 3.45e-07 ***
+
+
+modAirport_ac <- lm(DistToAirport ~ Category_full + ac_airport_2017, data = slf_2017)
+plotresid(modAirport_ac)
+summary(modAirport_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             5.276e+04  1.378e+03  38.298  < 2e-16 ***
+# Category_fullJumpers   -2.112e+04  1.125e+04  -1.878  0.06048 .  
+# Category_fullNegatives -3.408e+03  1.074e+03  -3.173  0.00152 ** 
+# ac_airport_2017        -2.034e-04  1.121e-05 -18.148  < 2e-16 ***
+
+
+
+modPort_ac <- lm(DistToPort ~ Category_full + ac_port_2017, data = slf_2017)
+plotresid(modPort_ac)
+summary(modPort_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             7.519e+04  3.071e+03  24.482  < 2e-16 ***
+# Category_fullJumpers   -5.744e+04  2.499e+04  -2.298   0.0216 *  
+# Category_fullNegatives  1.387e+04  2.369e+03   5.855 5.16e-09 ***
+# ac_port_2017           -8.191e-05  1.306e-05  -6.271 3.98e-10 ***
+```
+
+
+
+2018
+```{r glmm, echo = FALSE}
+
+library(spdep)
+
+### 2018
+slf_2018 <- slf_cat %>% filter(bio_year == 2018)
+coords_2018 <- as.matrix(cbind(slf_2018$longitude_rounded,slf_2018$latitude_rounded))
+
+# compute the autocovariate based on the above distance and weight 
+ac_rail_2018 <- autocov_dist(slf_2018$DistToRail, coords_2018, nbs = 100, type = "one", longlat = T)
+ac_road_2018 <- autocov_dist(slf_2018$DistToRoad, coords_2018, nbs = 100, type = "one", longlat = T)
+ac_airport_2018 <- autocov_dist(slf_2018$DistToAirport, coords_2018, nbs = 100, type = "one", longlat = T)
+ac_port_2018 <- autocov_dist(slf_2018$DistToPort, coords_2018, nbs = 100, type = "one", longlat = T)
+
+# Rail
+modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail_2018, data = slf_2018)
+plotresid(modRail_ac)
+summary(modRail_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             6.460e+00  5.699e-02 113.357  < 2e-16 ***
+# Category_fullJumpers   -7.434e-01  2.072e-01  -3.588 0.000335 ***
+# Category_fullNegatives  6.907e-01  5.023e-02  13.750  < 2e-16 ***
+# ac_rail_2018            3.955e-08  2.400e-09  16.478  < 2e-16 ***
+
+modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road_2018, data = slf_2018)
+plotresid(modRoad_ac)
+summary(modRoad_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             5.458e+00  6.019e-02  90.674   <2e-16 ***
+# Category_fullJumpers   -2.973e-01  2.130e-01  -1.396    0.163    
+# Category_fullNegatives  9.507e-02  5.246e-02   1.812    0.070 .  
+# ac_road_2018            1.651e-07  1.020e-08  16.187   <2e-16 ***
+  
+modAirport_ac <- lm(DistToAirport ~ Category_full + ac_airport_2018, data = slf_2018)
+plotresid(modAirport_ac)
+summary(modAirport_ac)
+#                         Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)            2.458e+04  8.025e+02  30.630  < 2e-16 ***
+# Category_fullJumpers   1.463e+04  2.802e+03   5.221 1.81e-07 ***
+# Category_fullNegatives 7.151e+03  6.896e+02  10.370  < 2e-16 ***
+# ac_airport_2018        1.968e-05  4.302e-06   4.574 4.83e-06 ***
+
+
+modPort_ac <- lm(DistToPort ~ Category_full + ac_port_2018, data = slf_2018)
+plotresid(modPort_ac)
+summary(modPort_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)            -3.819e+03  1.402e+03  -2.724  0.00645 ** 
+# Category_fullJumpers    9.047e+04  5.408e+03  16.729  < 2e-16 ***
+# Category_fullNegatives  3.873e+04  1.301e+03  29.780  < 2e-16 ***
+# ac_port_2018            2.027e-04  3.009e-06  67.369  < 2e-16 ***
+```
+
+
+
+2019
+```{r glmm, echo = FALSE}
+
+library(spdep)
+
+### 2019
+slf_2019 <- slf_cat %>% filter(bio_year == 2019)
+coords_2019 <- as.matrix(cbind(slf_2019$longitude_rounded,slf_2019$latitude_rounded))
+
+# compute the autocovariate based on the above distance and weight 
+ac_rail_2019 <- autocov_dist(slf_2019$DistToRail, coords_2019, nbs = 100, type = "one", longlat = T)
+ac_road_2019 <- autocov_dist(slf_2019$DistToRoad, coords_2019, nbs = 100, type = "one", longlat = T)
+ac_airport_2019 <- autocov_dist(slf_2019$DistToAirport, coords_2019, nbs = 100, type = "one", longlat = T)
+ac_port_2019 <- autocov_dist(slf_2019$DistToPort, coords_2019, nbs = 100, type = "one", longlat = T)
+
+# Rail
+modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail_2019, data = slf_2019)
+plotresid(modRail_ac)
+summary(modRail_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             6.630e+00  3.645e-02 181.892  < 2e-16 ***
+# Category_fullJumpers   -9.519e-01  2.127e-01  -4.474 7.69e-06 ***
+# Category_fullNegatives  5.825e-01  3.056e-02  19.062  < 2e-16 ***
+# ac_rail_2019            2.209e-08  8.625e-10  25.608  < 2e-16 ***
+
+modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road_2019, data = slf_2019)
+plotresid(modRoad_ac)
+summary(modRoad_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             5.607e+00  4.036e-02 138.934  < 2e-16 ***
+# Category_fullJumpers   -4.617e-01  2.214e-01  -2.086    0.037 *  
+# Category_fullNegatives  2.376e-01  3.273e-02   7.258 4.03e-13 ***
+# ac_road_2019            7.116e-08  3.699e-09  19.240  < 2e-16 ***
+  
+modAirport_ac <- lm(DistToAirport ~ Category_full + ac_airport_2019, data = slf_2019)
+plotresid(modAirport_ac)
+summary(modAirport_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             3.364e+04  4.677e+02  71.927  < 2e-16 ***
+# Category_fullJumpers   -8.118e+02  2.646e+03  -0.307 0.758969    
+# Category_fullNegatives  3.360e+03  3.866e+02   8.690  < 2e-16 ***
+# ac_airport_2019        -4.514e-06  1.349e-06  -3.346 0.000822 ***
+
+modPort_ac <- lm(DistToPort ~ Category_full + ac_port_2019, data = slf_2019)
+plotresid(modPort_ac)
+summary(modPort_ac)
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)            -1.305e+04  1.195e+03 -10.921  < 2e-16 ***
+# Category_fullJumpers    4.946e+04  7.749e+03   6.383 1.77e-10 ***
+# Category_fullNegatives  5.749e+04  1.079e+03  53.269  < 2e-16 ***
+# ac_port_2019            1.475e-04  1.358e-06 108.669  < 2e-16 ***
+```
+
+
+2020
+```{r glmm, echo = FALSE}
+
+library(spdep)
+
+### 2020
+slf_2020 <- slf_cat %>% filter(bio_year == 2020)
+coords_2020 <- as.matrix(cbind(slf_2020$longitude_rounded,slf_2020$latitude_rounded))
+
+# compute the autocovariate based on the above distance and weight 
+ac_rail_2020 <- autocov_dist(slf_2020$DistToRail, coords_2020, nbs = 200, type = "one", longlat = T)
+ac_road_2020 <- autocov_dist(slf_2020$DistToRoad, coords_2020, nbs = 200, type = "one", longlat = T)
+ac_airport_2020 <- autocov_dist(slf_2020$DistToAirport, coords_2020, nbs = 200, type = "one", longlat = T)
+ac_port_2020 <- autocov_dist(slf_2020$DistToPort, coords_2020, nbs = 200, type = "one", longlat = T)
+
+# Rail
+modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail_2020, data = slf_2020)
+plotresid(modRail_ac)
+summary(modRail_ac)
+# Coefficients:
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             6.412e+00  6.022e-02 106.478   <2e-16 ***
+# Category_fullJumpers   -1.826e-01  3.770e-01  -0.484    0.628    
+# Category_fullNegatives  5.873e-01  4.607e-02  12.747   <2e-16 ***
+# ac_rail_2020            1.503e-08  1.457e-09  10.313   <2e-16 ***
+
+modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road_2020, data = slf_2020)
+plotresid(modRoad_ac)
+summary(modRoad_ac)
+# Coefficients:
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             5.414e+00  5.731e-02  94.458  < 2e-16 ***
+# Category_fullJumpers   -5.355e-01  3.656e-01  -1.465    0.143    
+# Category_fullNegatives  2.800e-01  4.465e-02   6.271  3.7e-10 ***
+# ac_road_2020            5.798e-08  5.102e-09  11.365  < 2e-16 ***
+  
+modAirport_ac <- lm(DistToAirport ~ Category_full + ac_airport_2020, data = slf_2020)
+plotresid(modAirport_ac)
+summary(modAirport_ac)
+# Coefficients:
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)             3.364e+04  4.677e+02  71.927  < 2e-16 ***
+# Category_fullJumpers   -8.118e+02  2.646e+03  -0.307 0.758969    
+# Category_fullNegatives  3.360e+03  3.866e+02   8.690  < 2e-16 ***
+# ac_airport_2019        -4.514e-06  1.349e-06  -3.346 0.000822 ***
+
+modPort_ac <- lm(DistToPort ~ Category_full + ac_port_2020, data = slf_2020)
+plotresid(modPort_ac)
+summary(modPort_ac)
+# Coefficients:
+#                          Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)            -1.305e+04  1.195e+03 -10.921  < 2e-16 ***
+# Category_fullJumpers    4.946e+04  7.749e+03   6.383 1.77e-10 ***
+# Category_fullNegatives  5.749e+04  1.079e+03  53.269  < 2e-16 ***
+# ac_port_2019            1.475e-04  1.358e-06 108.669  < 2e-16 ***
+
+```
+
+
+
+
+
+#### LM + AC SLF uptodate dataset
+Resample diffusers and negatives with n = n(Jumpers)
+Calculate ac coefficients
+Run model
+
+#### Full dataset
+Dist to rail
+```{r lm with ac, echo = FALSE}
+library(spdep)
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
+dim(slf_uptodate)
+
+ModelsRail = NULL
+
+# Define the datasets
+Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
+Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
+Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers")
+njumpers_full = dim(Jumpers_full)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), size = njumpers_full, replace = FALSE),]
+  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), size = njumpers_full, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_full, Diffusers_full_sample, Negatives_full_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## Model for railroad distance:
+  # Calculate ac coefficients
+  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_railroad)){ print("Dataset error")}
+  dataset %<>% add_column(ac_rail = ac_railroad)
+  
+  # Run model
+  modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modRailac <- summary(modRail_ac)
+  
+  ModelsRail <- rbind(ModelsRail, summary_modRailac$coefficients[c(1:4, 14:16)]) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+
+ModelsRail <- data.frame(ModelsRail)
+names(ModelsRail) = c("Int_est", "DJ_est", "DN_est", "AC_est",
+                 "DJp", "DNp", "ACp")
+
+write.csv(ModelsRail, file.path(here(), "exported-data", "ModelsRail.csv"))
+ModelsRail <- read.csv(file.path(here(), "exported-data", "ModelsRail_chull.csv"))
+
+hist(ModelsRail$Int_est)
+hist(ModelsRail$DJ_est)
+hist(ModelsRail$DN_est)
+hist(ModelsRail$AC_est)
+
+ModelsRail %>% summarise(meanInt = mean(Int_est),
+                         sdInt = sd(Int_est),
+                     meanDJ = mean(DJ_est),
+                     sdDJ = sd(DJ_est),
+                     meanDN = mean(DN_est),
+                     sdDN = sd(DN_est),
+                     meanAC = mean(AC_est),
+                     sdAC = sd(AC_est))
+
+meanInt = 5.447765
+  
+meanJ = meanInt + -0.7469456
+sdDJ = 0.1309368
+Jcimax = meanJ + sdDJ*1.96
+Jcimin = meanJ - sdDJ*1.96
+
+meanN = meanInt + 0.83317
+sdDN = 0.1733588
+Ncimax = meanN + sdDN*1.96
+Ncimin = meanN - sdDN*1.96
+
+
+round(quantile(ModelsRail$DJ_est, probs = 0.975), 2)
+round(quantile(ModelsRail$DJ_est, probs = 0.025), 2)
+
+quantile(ModelsRail$DN_est, probs = 0.975)
+quantile(ModelsRail$DN_est, probs = 0.025)
+
+ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DNsignif)
+6/10000 vs 43/10000
+20/10000 vs 43/10000
+```
+
+
+Full dataset, dist to road
+```{r lm with ac, echo = FALSE}
+library(spdep)
+
+ModelsRoad = NULL
+
+# Define the datasets
+Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
+Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
+Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers")
+njumpers_full = dim(Jumpers_full)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), size = njumpers_full, replace = FALSE),]
+  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), size = njumpers_full, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_full, Diffusers_full_sample, Negatives_full_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## Model for road distance:
+  # Calculate ac coefficients
+  ac_road <- autocov_dist(dataset$DistToRoad, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_road)){ print("Dataset error")}
+  dataset %<>% add_column(ac_rail = ac_road)
+  
+  # Run model
+  modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modRoadac <- summary(modRoad_ac)
+  
+  ModelsRoad <- rbind(ModelsRoad, summary_modRoadac$coefficients[c(1:4, 14:16)]) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+ModelsRoad <- data.frame(ModelsRoad)
+names(ModelsRoad) = c("Int_est", "DJ_est", "DN_est", "AC_est",
+                 "DJp", "DNp", "ACp")
+
+write.csv(ModelsRoad, file.path(here(), "exported-data", "ModelsRoad_chull.csv"))
+ModelsRoad <- read.csv(file.path(here(), "exported-data", "ModelsRoad_chull.csv"))
+
+hist(ModelsRoad$Int_est)
+hist(ModelsRoad$DJ_est)
+hist(ModelsRoad$DN_est)
+hist(ModelsRoad$AC_est)
+
+ModelsRoad %>% summarise(meanInt = mean(Int_est),
+                         sdInt = sd(Int_est),
+                     meanDJ = mean(DJ_est),
+                     sdDJ = sd(DJ_est),
+                     meanDN = mean(DN_est),
+                     sdDN = sd(DN_est),
+                     meanAC = mean(AC_est),
+                     sdAC = sd(AC_est))
+
+ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DNsignif)
+267/10000 vs 335
+9113/10000 vs 8414/10000
+```
+
+
+Full dataset, dist to airport
+```{r lm with ac, echo = FALSE}
+library(spdep)
+
+ModelsAirport = NULL
+
+# Define the datasets
+Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
+Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
+Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers")
+njumpers_full = dim(Jumpers_full)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), size = njumpers_full, replace = FALSE),]
+  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), size = njumpers_full, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_full, Diffusers_full_sample, Negatives_full_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## Model for Airport distance:
+  # Calculate ac coefficients
+  ac_Airport <- autocov_dist(dataset$DistToAirport, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_Airport)){ print("Dataset error")}
+  dataset %<>% add_column(ac_rail = ac_Airport)
+  
+  # Run model
+  modAirport_ac <- lm(log(DistToAirport+1) ~ Category_full + ac_Airport, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modAirportac <- summary(modAirport_ac)
+  
+  ModelsAirport <- rbind(ModelsAirport, summary_modAirportac$coefficients[c(1:4, 14:16)]) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+ModelsAirport <- data.frame(ModelsAirport)
+names(ModelsAirport) = c("Int_est", "DJ_est", "DN_est", "AC_est",
+                 "DJp", "DNp", "ACp")
+
+write.csv(ModelsAirport, file.path(here(), "exported-data", "ModelsAirport_chull.csv"))
+ModelsAirport <- read.csv(file.path(here(), "exported-data", "ModelsAirport.csv"))
+
+hist(ModelsAirport$Int_est)
+hist(ModelsAirport$DJ_est)
+hist(ModelsAirport$DN_est)
+hist(ModelsAirport$AC_est)
+
+ModelsAirport %>% summarise(meanInt = mean(Int_est),
+                         sdInt = sd(Int_est),
+                     meanDJ = mean(DJ_est),
+                     sdDJ = sd(DJ_est),
+                     meanDN = mean(DN_est),
+                     sdDN = sd(DN_est),
+                     meanAC = mean(AC_est),
+                     sdAC = sd(AC_est))
+
+ModelsAirport %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DNsignif)
+2110/10000 vs 1772
+5674/10000 vs 6983
+```
+
+
+Full dataset, dist to Port
+```{r lm with ac, echo = FALSE}
+library(spdep)
+
+ModelsPort = NULL
+dim(slf_uptodate)
+
+# Define the datasets
+Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
+Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
+Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers")
+njumpers_full = dim(Jumpers_full)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), size = njumpers_full, replace = FALSE),]
+  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), size = njumpers_full, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_full, Diffusers_full_sample, Negatives_full_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## Model for Port distance:
+  # Calculate ac coefficients
+  ac_Port <- autocov_dist(dataset$DistToPort, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_Port)){ print("Dataset error")}
+  dataset %<>% add_column(ac_rail = ac_Port)
+  
+  # Run model
+  modPort_ac <- lm(log(DistToPort+1) ~ Category_full + ac_Port, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modPortac <- summary(modPort_ac)
+  
+  ModelsPort <- rbind(ModelsPort, summary_modPortac$coefficients[c(1:4, 14:16)]) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+ModelsPort <- data.frame(ModelsPort)
+names(ModelsPort) = c("Int_est", "DJ_est", "DN_est", "AC_est",
+                 "DJp", "DNp", "ACp")
+
+write.csv(ModelsPort, file.path(here(), "exported-data", "ModelsPort_chull.csv"))
+ModelsPort <- read.csv(file.path(here(), "exported-data", "ModelsPort.csv"))
+
+hist(ModelsPort$Int_est)
+hist(ModelsPort$DJ_est)
+hist(ModelsPort$DN_est)
+hist(ModelsPort$AC_est)
+
+ModelsPort %>% summarise(meanInt = mean(Int_est),
+                         sdInt = sd(Int_est),
+                     meanDJ = mean(DJ_est),
+                     sdDJ = sd(DJ_est),
+                     meanDN = mean(DN_est),
+                     sdDN = sd(DN_est),
+                     meanAC = mean(AC_est),
+                     sdAC = sd(AC_est))
+
+ModelsPort %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DNsignif)
+9949/10000 vs 9990
+380/10000 vs 1353
+```
+
+
+
+##### Visualize boostrapped means
+```{resample dataset 10,000 times}
+
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"), h=T)
+
+Resampled_datasets = NULL
+
+# Define the datasets
+Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
+Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
+Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers")
+njumpers_full = dim(Jumpers_full)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), size = njumpers_full, replace = FALSE),]
+  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), size = njumpers_full, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_full, Diffusers_full_sample, Negatives_full_sample)
+  dataset_summary <- dataset %>% group_by(Category_full) %>% summarise(DistToAirport_mean = mean(DistToAirport),
+                                                    DistToPort_mean = mean(DistToPort),
+                                                    DistToRoad_mean = mean(DistToRoad),
+                                                    DistToRail_mean = mean(DistToRail),
+                                                    DistToAirport_median = median(DistToAirport),
+                                                    DistToPort_median = median(DistToPort),
+                                                    DistToRoad_median = median(DistToRoad),
+                                                    DistToRail_median = median(DistToRail))
+  
+  Resampled_datasets <- rbind(Resampled_datasets, dataset_summary) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+    
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+dim(Resampled_datasets)
+head(Resampled_datasets)
+
+write.csv(Resampled_datasets, file.path(here(), "exported-data", "Resampled_datasets.csv"))
+
+```
+
+```{r visualize bootstrap results, fig.height = 5, fig.width = 6, fig.cap = "Comparison of the distance of jumpers to transports to a random distribution"}
+
+# Get the average observed values
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
+dim(slf_uptodate)
+head(slf_uptodate)
+slf_uptodate_long <- slf_uptodate %>%
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+slf_obsmeans <- slf_uptodate_long %>% 
+  group_by(Category_full, DistanceType) %>% 
+  summarise(MeanDistance = mean(DistanceValue),
+            MedianDistance = median(DistanceValue))
+slf_obsmeans$Category_full <- factor(slf_obsmeans$Category_full, levels = c("Jumpers", "Diffusers", "Negatives"))
+
+
+Resampled_datasets <- read.csv(file.path(here(), "exported-data", "Resampled_datasets.csv"))
+head(Resampled_datasets)
+# Convert to long format
+Resampled_long <- Resampled_datasets %>% pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+Resampled_long$Category_full <- factor(Resampled_long$Category_full, levels = c("Jumpers", "Diffusers", "Negatives"))
+
+# Means
+Resampled_means <- Resampled_long %>% filter(grepl("_mean", DistanceType))
+Resampled_means$DistanceType <- as.factor(Resampled_means$DistanceType)
+levels(Resampled_means$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
+
+
+# Full dataset
+# Plot observed vs simulated means
+color_sel <- RColorBrewer::brewer.pal(4, "Dark2")[2:3]
+first_color <- RColorBrewer::brewer.pal(4, "Dark2")[1]
+
+random_transport <- ggplot() +
+  geom_histogram(data = Resampled_means %>% filter(Category_full %in% c("Diffusers", "Negatives")),
+                 aes(x =  DistanceValue/1000, fill = Category_full), alpha = 0.8, binwidth = 0.1, position = "identity") +
+  geom_vline(data = slf_obsmeans %>% filter(Category_full == "Jumpers"),
+             mapping = aes(xintercept = MeanDistance/1000), col = first_color, size = 1.5) +
+  scale_fill_manual(values = color_sel) +
+  xlab("Distance to the nearest... (km)") +
+  ylab("Count (simulations)") +
+  facet_wrap(~DistanceType, ncol = 4, scale = "free",
+              labeller = labeller(DistanceType = 
+    c("DistToAirport" = "Airport",
+      "DistToPort" = "Port",
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road"))) +
+  theme_classic() +
+  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
+
+ggsave(file.path(here(), "figures", "vignette_transports", "resampled_full_mean.jpg"), random_transport, width = 10, height = 3)
+
+
+
+# Medians
+Resampled_medians <- Resampled_long %>% filter(grepl("_median", DistanceType))
+Resampled_medians$DistanceType <- as.factor(Resampled_medians$DistanceType)
+levels(Resampled_medians$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
+
+
+# Plot observed vs simulated medians
+random_transport <- ggplot() +
+  geom_histogram(data = Resampled_medians %>% filter(Category_full %in% c("Diffusers", "Negatives")), 
+                 aes(x =  DistanceValue/1000, fill = Category_full), alpha = 0.8, binwidth = 0.1, position = "identity") +
+  geom_vline(data = slf_obsmeans %>% filter(Category_full == "Jumpers"),
+             mapping = aes(xintercept = MedianDistance/1000), col = first_color, size = 1.5) +
+  scale_fill_manual(values = color_sel) +
+  xlab("Distance to the nearest... (km)") +
+  ylab("Count (simulations)") +
+  facet_wrap(~DistanceType, ncol = 4, scale = "free",
+              labeller = labeller(DistanceType = 
+    c("DistToAirport" = "Airport",
+      "DistToPort" = "Port",
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road"))) +
+  theme_classic() +
+  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
+
+ggsave(file.path(here(), "figures", "vignette_transports", "resampled_full_median.jpg"), random_transport, width = 10, height = 3)
+
+
+
+
+
+```
+
+
+
+#### Rarefied dataset
+Dist to rail
+```{r lm with ac, echo = FALSE}
+library(spdep)
+
+ModelsRail = NULL
+
+# Define the datasets
+Diffusers_rare <- slf_uptodate %>% filter(Category_rare == "Diffusers")
+Negatives_rare <- slf_uptodate %>% filter(Category_rare == "Negatives")
+Jumpers_rare <- slf_uptodate %>% filter(Category_rare == "Jumpers")
+njumpers_rare = dim(Jumpers_rare)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_rare_sample <- Diffusers_rare[sample(nrow(Diffusers_rare), size = njumpers_rare, replace = FALSE),]
+  Negatives_rare_sample <- Negatives_rare[sample(nrow(Negatives_rare), size = njumpers_rare, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_rare, Diffusers_rare_sample, Negatives_rare_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## Model for railroad distance:
+  # Calculate ac coefficients
+  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_railroad)){ print("Dataset error")}
+  dataset %<>% add_column(ac_rail = ac_railroad)
+  
+  # Run model
+  modRail_ac <- lm(log(DistToRail+1) ~ Category_rare + ac_rail, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modRailac <- summary(modRail_ac)
+  
+  ModelsRail <- rbind(ModelsRail, summary_modRailac$coefficients[c(1:4, 14:16)]) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+
+ModelsRail <- data.frame(ModelsRail)
+names(ModelsRail) = c("Int_est", "DJ_est", "DN_est", "AC_est",
+                 "DJp", "DNp", "ACp")
+
+write.csv(ModelsRail, file.path(here(), "exported-data", "ModelsRail_chullrarefied.csv"))
+ModelsRail <- read.csv(file.path(here(), "exported-data", "ModelsRail_chullrarefied.csv"))
+
+hist(ModelsRail$Int_est)
+hist(ModelsRail$DJ_est)
+hist(ModelsRail$DN_est)
+hist(ModelsRail$AC_est)
+
+ModelsRail %>% summarise(meanInt = mean(Int_est),
+                         sdInt = sd(Int_est),
+                     meanDJ = mean(DJ_est),
+                     sdDJ = sd(DJ_est),
+                     meanDN = mean(DN_est),
+                     sdDN = sd(DN_est),
+                     meanAC = mean(AC_est),
+                     sdAC = sd(AC_est))
+
+ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DNsignif)
+9735/10000 vs 9891
+3411/10000 vs 3630
+```
+
+
+Dist to road
+```{r lm with ac, echo = FALSE}
+library(spdep)
+
+ModelsRoad = NULL
+
+# Define the datasets
+Diffusers_rare <- slf_uptodate %>% filter(Category_rare == "Diffusers")
+Negatives_rare <- slf_uptodate %>% filter(Category_rare == "Negatives")
+Jumpers_rare <- slf_uptodate %>% filter(Category_rare == "Jumpers")
+njumpers_rare = dim(Jumpers_rare)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_rare_sample <- Diffusers_rare[sample(nrow(Diffusers_rare), size = njumpers_rare, replace = FALSE),]
+  Negatives_rare_sample <- Negatives_rare[sample(nrow(Negatives_rare), size = njumpers_rare, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_rare, Diffusers_rare_sample, Negatives_rare_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## Model for road distance:
+  # Calculate ac coefficients
+  ac_road <- autocov_dist(dataset$DistToRoad, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_road)){ print("Dataset error")}
+  dataset %<>% add_column(ac_rail = ac_road)
+  
+  # Run model
+  modRoad_ac <- lm(log(DistToRoad+1) ~ Category_rare + ac_road, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modRoadac <- summary(modRoad_ac)
+  
+  ModelsRoad <- rbind(ModelsRoad, summary_modRoadac$coefficients[c(1:4, 14:16)]) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+
+dim(ModelsRoad)
+ModelsRoad <- data.frame(ModelsRoad)
+names(ModelsRoad) = c("Int_est", "DJ_est", "DN_est", "AC_est",
+                 "DJp", "DNp", "ACp")
+
+write.csv(ModelsRoad, file.path(here(), "exported-data", "ModelsRoad_chullrarefied.csv"))
+ModelsRoad <- read.csv(file.path(here(), "exported-data", "ModelsRoad_rarefied.csv"))
+
+hist(ModelsRoad$Int_est)
+hist(ModelsRoad$DJ_est)
+hist(ModelsRoad$DN_est)
+hist(ModelsRoad$AC_est)
+
+ModelsRoad %>% summarise(meanInt = mean(Int_est),
+                         sdInt = sd(Int_est),
+                     meanDJ = mean(DJ_est),
+                     sdDJ = sd(DJ_est),
+                     meanDN = mean(DN_est),
+                     sdDN = sd(DN_est),
+                     meanAC = mean(AC_est),
+                     sdAC = sd(AC_est))
+
+ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+9832/10000 vs 9870
+8921/10000 vs 8826
+
+```
+
+
+Dist to airport
+```{r lm with ac, echo = FALSE}
+library(spdep)
+
+ModelsAirport = NULL
+
+# Define the datasets
+Diffusers_rare <- slf_uptodate %>% filter(Category_rare == "Diffusers")
+Negatives_rare <- slf_uptodate %>% filter(Category_rare == "Negatives")
+Jumpers_rare <- slf_uptodate %>% filter(Category_rare == "Jumpers")
+njumpers_rare = dim(Jumpers_rare)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_rare_sample <- Diffusers_rare[sample(nrow(Diffusers_rare), size = njumpers_rare, replace = FALSE),]
+  Negatives_rare_sample <- Negatives_rare[sample(nrow(Negatives_rare), size = njumpers_rare, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_rare, Diffusers_rare_sample, Negatives_rare_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## Model for Airport distance:
+  # Calculate ac coefficients
+  ac_Airport <- autocov_dist(dataset$DistToAirport, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_Airport)){ print("Dataset error")}
+  dataset %<>% add_column(ac_rail = ac_Airport)
+  
+  # Run model
+  modAirport_ac <- lm(log(DistToAirport+1) ~ Category_rare + ac_Airport, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modAirportac <- summary(modAirport_ac)
+  
+  ModelsAirport <- rbind(ModelsAirport, summary_modAirportac$coefficients[c(1:4, 14:16)]) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+ModelsAirport <- data.frame(ModelsAirport)
+names(ModelsAirport) = c("Int_est", "DJ_est", "DN_est", "AC_est",
+                 "DJp", "DNp", "ACp")
+
+write.csv(ModelsAirport, file.path(here(), "exported-data", "ModelsAirport_chullrarefied.csv"))
+ModelsAirport <- read.csv(file.path(here(), "exported-data", "ModelsAirport_rarefied.csv"))
+
+hist(ModelsAirport$Int_est)
+hist(ModelsAirport$DJ_est)
+hist(ModelsAirport$DN_est)
+hist(ModelsAirport$AC_est)
+
+ModelsAirport %>% summarise(meanInt = mean(Int_est),
+                         sdInt = sd(Int_est),
+                     meanDJ = mean(DJ_est),
+                     sdDJ = sd(DJ_est),
+                     meanDN = mean(DN_est),
+                     sdDN = sd(DN_est),
+                     meanAC = mean(AC_est),
+                     sdAC = sd(AC_est))
+
+ModelsAirport %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+9510/10000 vs 7994
+7357/10000 vs 7096
+```
+
+
+Dist to Port
+```{r lm with ac, echo = FALSE}
+library(spdep)
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
+ModelsPort = NULL
+
+# Define the datasets
+Diffusers_rare <- slf_uptodate %>% filter(Category_rare == "Diffusers")
+Negatives_rare <- slf_uptodate %>% filter(Category_rare == "Negatives")
+Jumpers_rare <- slf_uptodate %>% filter(Category_rare == "Jumpers")
+njumpers_rare = dim(Jumpers_rare)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_rare_sample <- Diffusers_rare[sample(nrow(Diffusers_rare), size = njumpers_rare, replace = FALSE),]
+  Negatives_rare_sample <- Negatives_rare[sample(nrow(Negatives_rare), size = njumpers_rare, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_rare, Diffusers_rare_sample, Negatives_rare_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## Model for Port distance:
+  # Calculate ac coefficients
+  ac_Port <- autocov_dist(dataset$DistToPort, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_Port)){ print("Dataset error")}
+  dataset %<>% add_column(ac_rail = ac_Port)
+  
+  # Run model
+  modPort_ac <- lm(log(DistToPort+1) ~ Category_rare + ac_Port, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modPortac <- summary(modPort_ac)
+  
+  ModelsPort <- rbind(ModelsPort, summary_modPortac$coefficients[c(1:4, 14:16)]) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+ModelsPort <- data.frame(ModelsPort)
+names(ModelsPort) = c("Int_est", "DJ_est", "DN_est", "AC_est",
+                 "DJp", "DNp", "ACp")
+
+write.csv(ModelsPort, file.path(here(), "exported-data", 
+"ModelsPort_rarefied.csv"))
+ModelsPort <- read.csv(file.path(here(), "exported-data", "ModelsPort_rarefied.csv"))
+
+hist(ModelsPort$Int_est)
+hist(ModelsPort$DJ_est)
+hist(ModelsPort$DN_est)
+hist(ModelsPort$AC_est)
+
+ModelsPort %>% summarise(meanInt = mean(Int_est),
+                         sdInt = sd(Int_est),
+                     meanDJ = mean(DJ_est),
+                     sdDJ = sd(DJ_est),
+                     meanDN = mean(DN_est),
+                     sdDN = sd(DN_est),
+                     meanAC = mean(AC_est),
+                     sdAC = sd(AC_est))
+
+ModelsPort %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DNsignif)
+1788/10000 vs 270
+9328/10000 vs 2227
+```
+
+
+Visualized resampled means
+```{resample dataset 10,000 times}
+
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"), h=T)
+
+Resampled_datasets = NULL
+
+# Define the datasets
+Diffusers_rare <- slf_uptodate %>% filter(Category_rare == "Diffusers")
+Negatives_rare <- slf_uptodate %>% filter(Category_rare == "Negatives")
+Jumpers_rare <- slf_uptodate %>% filter(Category_rare == "Jumpers")
+njumpers_rare = dim(Jumpers_rare)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_rare_sample <- Diffusers_rare[sample(nrow(Diffusers_rare), size = njumpers_rare, replace = FALSE),]
+  Negatives_rare_sample <- Negatives_rare[sample(nrow(Negatives_rare), size = njumpers_rare, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_rare, Diffusers_rare_sample, Negatives_rare_sample)
+  dataset_summary <- dataset %>% group_by(Category_rare) %>% summarise(DistToAirport_mean = mean(DistToAirport),
+                                                    DistToPort_mean = mean(DistToPort),
+                                                    DistToRoad_mean = mean(DistToRoad),
+                                                    DistToRail_mean = mean(DistToRail),
+                                                    DistToAirport_median = median(DistToAirport),
+                                                    DistToPort_median = median(DistToPort),
+                                                    DistToRoad_median = median(DistToRoad),
+                                                    DistToRail_median = median(DistToRail))
+  
+  Resampled_datasets <- rbind(Resampled_datasets, dataset_summary) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+dim(Resampled_datasets)
+head(Resampled_datasets)
+
+write.csv(Resampled_datasets, file.path(here(), "exported-data", "Resampled_datasets_rarefied.csv"))
+
+```
+
+```{r visualize bootstrap results, fig.height = 5, fig.width = 6, fig.cap = "Comparison of the distance of jumpers to transports to a random distribution"}
+# Get the average observed values
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
+dim(slf_uptodate)
+head(slf_uptodate)
+slf_uptodate_long <- slf_uptodate %>%
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+slf_obsmeans <- slf_uptodate_long %>% 
+  group_by(Category_rare, DistanceType) %>% 
+  summarise(#MeanDistance = mean(DistanceValue),
+            MedianDistance = median(DistanceValue))
+slf_obsmeans$Category_rare <- factor(slf_obsmeans$Category_rare, levels = c("Jumpers", "Diffusers", "Negatives"))
+
+
+Resampled_datasets <- read.csv(file.path(here(), "exported-data", "Resampled_datasets_rarefied.csv"))
+head(Resampled_datasets)
+# Convert to long format
+Resampled_long <- Resampled_datasets %>% pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+Resampled_long$Category_rare <- factor(Resampled_long$Category_rare, levels = c("Jumpers", "Diffusers", "Negatives"))
+
+# Means
+Resampled_means <- Resampled_long %>% filter(grepl("_mean", DistanceType))
+Resampled_means$DistanceType <- as.factor(Resampled_means$DistanceType)
+levels(Resampled_means$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
+
+
+# Full dataset
+# Plot observed vs simulated means
+color_sel <- RColorBrewer::brewer.pal(4, "Dark2")[2:3]
+first_color <- RColorBrewer::brewer.pal(4, "Dark2")[1]
+
+random_transport <- ggplot() +
+  geom_histogram(data = Resampled_means %>% filter(Category_rare %in% c("Diffusers", "Negatives")), 
+                 aes(x =  DistanceValue/1000, fill = Category_rare), alpha = 0.8, binwidth = 0.1, position = "identity") +
+  geom_vline(data = slf_obsmeans %>% filter(Category_rare == "Jumpers"),
+             mapping = aes(xintercept = MeanDistance/1000), col = first_color, size = 1.5) +
+  scale_fill_manual(values = color_sel) +
+  xlab("Distance to the nearest... (km)") +
+  ylab("Count (simulations)") +
+  facet_wrap(~DistanceType, ncol = 4, scale = "free",
+              labeller = labeller(DistanceType = 
+    c("DistToAirport" = "Airport",
+      "DistToPort" = "Port",
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road"))) +
+  theme_classic() +
+  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
+
+ggsave(file.path(here(), "figures", "vignette_transports", "resampled_rare_mean.jpg"), random_transport, width = 10, height = 3)
+
+
+
+# Medians
+Resampled_medians <- Resampled_long %>% filter(grepl("_median", DistanceType))
+Resampled_medians$DistanceType <- as.factor(Resampled_medians$DistanceType)
+levels(Resampled_medians$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
+
+
+# Plot observed vs simulated medians
+random_transport <- ggplot() +
+  geom_histogram(data = Resampled_medians %>% filter(Category_rare %in% c("Diffusers", "Negatives")), 
+                 aes(x =  DistanceValue/1000, fill = Category_rare), alpha = 0.8, binwidth = 0.1, position = "identity") +
+  geom_vline(data = slf_obsmeans %>% filter(Category_rare == "Jumpers"),
+             mapping = aes(xintercept = MedianDistance/1000), col = first_color, size = 1.5) +
+  scale_fill_manual(values = color_sel) +
+  xlab("Distance to the nearest... (km)") +
+  ylab("Count (simulations)") +
+  facet_wrap(~DistanceType, ncol = 4, scale = "free",
+              labeller = labeller(DistanceType = 
+    c("DistToAirport" = "Airport",
+      "DistToPort" = "Port",
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road"))) +
+  theme_classic() +
+  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
+
+ggsave(file.path(here(), "figures", "vignette_transports", "resampled_rare_median.jpg"), random_transport, width = 10, height = 3)
+```
+
