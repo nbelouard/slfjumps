@@ -53,8 +53,6 @@ library(purrr)
 library(leaflet)
 
 sf::sf_use_s2(FALSE)
-
-aaaaaaa
 ```
 
 ## States map
