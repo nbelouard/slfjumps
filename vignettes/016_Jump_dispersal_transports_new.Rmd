@@ -170,7 +170,7 @@ dim(Rail_road_rare_75)
 
 # Primary airports (points, buffer radius = 1 000 m)
 # List given by FAA, location given by National Transportation Dataset (USGS)
-airports <- st_read(filepath(here(), C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Airports/airports_primary_buffer.shp", quiet = T)
+airports <- st_read(filepath(here(), "C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Airports/airports_primary_buffer.shp"), quiet = T)
 airports <- st_transform(airports, crs = "ESRI:102010")
 st_crs(airports)
 
@@ -323,6 +323,7 @@ rail <- ggplot(data = states) +
 
 ggsave(file.path(here(), "figures", "GIS_roadrail_75.jpg"), rail, width = 6, height = 6)
 
+aaa
 ```
 
 ```{r check distance airports with railroads and roads}

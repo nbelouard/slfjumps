@@ -1,0 +1,651 @@
+---
+title: "0151_Figures_jump_list"
+author: "Nadege Belouard"
+date: "3/30/2022"
+output: html_document
+---
+## Run the program (with one particular set of parameters)
+
+```{r run the program, echo = params$display, eval = params$run}
+
+grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"), h=T)
+centroid <- c(long = -75.675340, lat = 40.415240)
+
+# Attribute sectors
+slfdata <- attribute_sectors(grid_data, nb_sectors = 20, centroid = centroid, rotation = 4)
+
+# Convert table to long format
+slfdata_long <- slfdata %>% 
+  pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", values_to = "sectors_nb", 
+               names_prefix = "rotation", names_transform = list(rotation_nb = as.integer)) 
+
+# Find jumps
+Results <- find_jumps(slfdata_long, gap_size = 15, bio_year = c(2014:2020))
+dim(Results$Jump)
+
+
+# Map jumps
+ggplot(data = states) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Results$Jump, 
+             aes(x = longitude_rounded, y = latitude_rounded, fill = as.factor(bio_year)), shape = 21, size = 2) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43)) + 
+  theme(legend.position="top")
+
+
+```
+
+Optimization figure (figure 1)
+## Optimization
+```{r create figure of optimization}
+
+sectors = c(20)
+rotations = c(7)
+centroid <- c(-75.675340, 40.415240)
+optim <- data.frame(sectors = 0,
+          rotations = 0,
+          jumps = 0)
+  
+optim_list <- data.frame(s = NULL,
+                         r = NULL,
+                         DistToIntro = NULL,
+                         bio_year = NULL,
+                         latitude_rounded = NULL,
+                         longitude_rounded = NULL,
+                         slf_present = NULL,
+                         slf_established = NULL,
+                         Status = NULL,
+                         theta = NULL,
+                         DistToSLF = NULL)
+
+
+dim(grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2020)))
+
+
+for (s in sectors){
+  for (r in rotations){
+    i = 1
+    print(paste0("Sectors: ", s, ", rotations: ", r))
+    slfdata <- attribute_sectors(grid_data, nb_sectors = s, centroid = centroid, rotation = r)
+    slfdata_long <- slfdata %>% 
+      pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", 
+                   values_to = "sectors_nb", names_prefix = "rotation", 
+                   names_transform = list(rotation_nb = as.integer)) 
+    Results <- threshold_jump_multiple_num(slfdata_long, gap_size = 15, bio_year = c(2014:2020))
+    optim[i,] <- c(s, r, dim(Results$Jump)[1])
+    Results$Jump %<>% add_column(r = r, s = s)
+    optim_list <- rbind(optim_list, Results$Jump)
+    i = i + 1
+  }
+}
+
+
+# Number of jumps per set of parameters
+write.csv(optim, file.path(here(), "exported-data", "jumps_optimization2021.csv"), row.names = F)
+# optim <- read.csv("./exported-data/jumps_optimization2021.csv")
+
+# List of jumps per set of parameters
+write.csv(optim_list, file.path(here(), "exported-data", "jumps_optimization_list2021.csv"), row.names = F)
+# optim_list <- read.csv("./exported-data/jumps_optimization_list2021.csv")
+sum(optim$jumps) == dim(optim_list)[1]
+
+
+
+optim
+optim_sum <- optim_list %>% group_by(s, r) %>% summarise(jumps = n())
+
+# Plot it
+optim_plot <- ggplot(data = optim_sum, 
+                     aes(x = as.factor(r), y = jumps)) +
+  geom_bar(lwd = .05, stat = "identity") +
+  scale_fill_manual(values = c("#009E73", "#0072B2", "firebrick3", "gold2", "black")) +
+  # scale_alpha_manual(values = c(0.5, 1)) +
+  xlab("Number of rotations") +
+  ylab("Number of jumps") +
+  facet_wrap(~as.factor(s), nrow = 1) +
+  # guides(fill = guide_legend("Biological year", reverse = T), alpha = guide_legend("Dataset")) +
+  theme_classic() +
+  ggtitle("Number of sectors") +
+  theme(legend.position = "bottom", text = element_text(size = 12), axis.text.x = element_text(size = 5, angle = 90), plot.title = element_text(size = 12, hjust = 0.5))
+
+optim_plot
+
+
+
+
+
+# Run attribute_groups and rarefy on this
+rarefied_list <- data.frame(bio_year = NULL,
+                          latitude_rounded = NULL,
+                          longitude_rounded = NULL,
+                          s = NULL,
+                          r = NULL,
+                          Rarefied = NULL)
+sectors = c(4,8,12,16,20,24,28,40,60,80,100)
+rotations = c(1,2,3,4,5,10,15,20)
+
+for (sec in sectors){
+  for (rot in rotations){
+    print(paste0("Sectors: ", sec, ", rotations: ", rot))
+    dataset <- optim_list %>% filter(s == sec, r == rot)
+    Jump_groups <- group_jumps(dataset, gap_size = 15)
+    Jumps_unique <- rarefy_groups(Jump_groups) %>% add_column(Rarefied = TRUE)
+    Jumps_unique %<>% select("latitude_rounded", "longitude_rounded", "bio_year", "s", "r", "Rarefied")
+    rarefied_list <- rbind(rarefied_list, Jumps_unique)
+  }
+}
+
+
+rarefied_list %>% group_by(s, r) %>% summarise(jumps = n())
+
+full_list <- merge(optim_list, rarefied_list, by = c("latitude_rounded", "longitude_rounded", "bio_year", "r", "s"),
+                             all = T)
+full_list %<>% mutate(Rarefied = ifelse(is.na(Rarefied), "Full", "Rarefied"))
+
+full_list$Rarefied <- factor(full_list$Rarefied, levels = c( "Full", "Rarefied"))
+
+Optim_year <- full_list %>% group_by(sectors = s, rotations = r, bio_year = bio_year, Rarefied = Rarefied) %>% summarise(jumps = n())
+
+
+
+#2nd version with colors
+optim_plot <- ggplot(data = Optim_year, 
+                     aes(x = as.factor(rotations), y = jumps, 
+                         fill = forcats::fct_rev(as.factor(bio_year)),
+                         #alpha = Rarefied)
+                         ) +
+  geom_bar(lwd = .05, stat = "identity") +
+  scale_fill_manual(values = c("#009E73", "#0072B2", "firebrick3", "gold2", "black")) +
+  scale_alpha_manual(values = c(0.5, 1)) +
+  xlab("Number of rotations") +
+  ylab("Number of jumps") +
+  facet_wrap(~as.factor(sectors), nrow = 1) +
+  guides(fill = guide_legend("Biological year", reverse = T), alpha = guide_legend("Dataset")) +
+  theme_classic() +
+  ggtitle("Number of sectors") +
+  theme(legend.position = "bottom", text = element_text(size = 12), axis.text.x = element_text(size = 5, angle = 90), plot.title = NULL, element_text(size = 12, hjust = 0.5)))
+
+optim_plot
+
+ggsave("./figures/vignette_quadrants/optim_plot3.jpg", optim_plot, height = 6, width = 12)
+
+
+## Count how long it takes for min number of sectors x rotations
+# system.time({slfdata <- attribute_sectors(grid_data, nb_sectors = 20, centroid = centroid, rotation = 5)
+#   slfdata_long <- slfdata %>%
+#   pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", values_to = "sectors_nb", names_prefix = "rotation", names_transform = list(rotation_nb = as.integer))
+#   Results <- threshold_jump_multiple_num(slfdata_long, gap_size = 15, bio_year = c(2014:2020))})
+# # 38.77 sec
+# dim(Results$Jump)[1] #139
+# 
+# # Compare to higher number of sectors but no rotation
+# system.time({slfdata <- attribute_sectors(grid_data, nb_sectors = 80, centroid = centroid, rotation = 1)
+#   slfdata_long <- slfdata %>%
+#   pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", values_to = "sectors_nb", names_prefix = "rotation", names_transform = list(rotation_nb = as.integer))
+#   Results <- threshold_jump_multiple_num(slfdata_long, gap_size = 15, bio_year = c(2014:2020))})
+# # 72 sec
+# dim(Results$Jump)[1] #139
+```
+
+
+
+Maps of thresholds for each parameter sets.
+
+```{r map of threshold points per year per rotation, fig.cap = "Map of SLF jumps", fig.height=6, fig.width=10}
+centroid <- c(-75.675340, 40.415240)
+
+
+map_thresholds <- ggplot(data = states) +
+  geom_point(data = grid_data %>% filter(Status == "Established"),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Results$Dist, 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  facet_wrap(~bio_year, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) +
+  theme(legend.position="top")
+
+ggsave("./figures/vignette_quadrants/map_thresholds.jpg", map_thresholds, width = 15, height = 10)
+
+
+
+map_thresholds2016 <- ggplot(data = states) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2016)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Results$Dist %>% filter(bio_year == 2016), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  # facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-77, -75), ylim = c(40, 41), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2016.jpg", map_thresholds2016 , width = 15, height = 10)
+
+
+map_thresholds2017 <- ggplot(data = states) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2017)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Results$Dist %>%  filter(bio_year == 2017), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  # facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-77, -74), ylim = c(39.5, 41), expand = FALSE) +  
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2017.jpg", map_thresholds2017 , width = 15, height = 10)
+
+
+map_thresholds2018 <- ggplot(data = states) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2018)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Results$Dist %>%  filter(bio_year == 2018), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-79, -74), ylim = c(39, 42), expand = FALSE) +
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2018.jpg", map_thresholds2018 , width = 15, height = 10)
+
+
+
+map_thresholds2019 <- ggplot(data = states) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2019)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Results$Dist %>%  filter(bio_year == 2019), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-81, -73), ylim = c(39, 42), expand = FALSE) +
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2019.jpg", map_thresholds2019 , width = 15, height = 10)
+
+
+
+map_thresholds2020 <- ggplot(data = states) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Results$Dist %>%  filter(bio_year == 2020), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2020.jpg", map_thresholds2020 , width = 15, height = 10)
+
+```
+
+The gap size of 16 km is discarded because Harrisburg is not considered a jump. We keep gap sizes of 15 and 10 km.
+DP16GS10 is discarded - aberrant thresholds are found near the introduction site due to a lack of data.
+DP8GS10 is discarded - aberrant threhsolds are found far away from the invasion front
+We keep DP8GS15, DP12GS10 and DP12GS15, DP16GS15.
+
+
+Maps of jumps for each parameter sets.
+
+```{r map of jumps per params per year, fig.cap = "Map of SLF jumps", fig.height=6, fig.width=10}
+
+map_jumps2016 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2015)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2016)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2016), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>%  filter(bio_year == 2016), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-77, -75), ylim = c(40, 41), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2016.jpg", map_jumps2016 , width = 15, height = 10)
+
+
+map_jumps2017 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2016)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2017)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data %>%  filter(bio_year == 2017),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2017), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>% filter(bio_year == 2017), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-77, -74), ylim = c(39.5, 41), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2017.jpg", map_jumps2017 , width = 15, height = 10)
+
+
+map_jumps2018 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2017)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2018)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2018), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>%  filter(bio_year == 2018), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-79, -74), ylim = c(39, 42), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2018.jpg", map_jumps2018 , width = 15, height = 10)
+
+
+
+map_jumps2019 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2018)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2019)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+  geom_point(data = Thresholds %>%  filter(bio_year == 2019), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>%  filter(bio_year == 2019), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-81, -73), ylim = c(39, 42), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2019.jpg", map_jumps2019 , width = 15, height = 10)
+
+
+map_jumps2020 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2019)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+  geom_point(data = Thresholds %>%  filter(bio_year == 2020), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>%  filter(bio_year == 2020), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  facet_wrap(~params, ncol = 4) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2020.jpg", map_jumps2020 , width = 15, height = 10)
+
+```
+
+
+```{r map all jumps per params set}
+
+# All jumps one set
+map_jumps <- ggplot(data = states) +
+  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+  geom_point(data = jumps, 
+             aes(x = longitude_rounded, y = latitude_rounded, fill = as.factor(bio_year)), shape = 21, size = 2) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("./figures/vignette_quadrants/map_jumps.jpg", map_jumps , width = 8, height = 8)
+
+
+```
+
+
+## Figure 2
+
+```{r load dataset}
+Jumps <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
+head(Jumps)
+Jumps %<>% mutate(Rarefied = ifelse(is.na(Rarefied), "Full", "Rarefied"))
+dim(Jumps)
+
+Jumps$Rarefied <- factor(Jumps$Rarefied, levels = c( "Full", "Rarefied"))
+
+#2nd version with colors
+Jumps_year <- Jumps %>% group_by(bio_year, Rarefied) %>% summarise(n = n())
+ 
+jumps_plot <- ggplot() +
+  geom_bar(data = Jumps_year %>% filter(Rarefied == "Rarefied"), aes(x = bio_year, y = n, fill = as.factor(bio_year), group = Rarefied, col = as.factor(bio_year)#, alpha = Rarefied
+                                                                     ), stat = "identity", lwd = .25) +
+  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  # scale_alpha_manual(values = c(0, 1)) +
+  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  xlab("Biological year") +
+  ylab("Number of jumps") +
+  theme_classic() +
+  guides(alpha = "none", fill = "none", col = "none") +
+  theme(text = element_text(size = 10), legend.position = "top")
+
+jumps_plot
+
+ggsave("./figures/vignette_quadrants/jumps_plotv2.jpg", jumps_plot, height = 2.5, width = 4)
+
+
+
+grid_data <- read.csv("./exported-data/grid_data.csv")
+# The number of rows must be 58,915 with 2021 preliminary data
+grid_data %<>% filter(!bio_year == 2021, longitude_rounded > -90)
+centroid <- c(-75.675340, 40.415240)
+
+
+# Map it
+map_rarified <- ggplot(data = grid_data) +
+  geom_sf(data = states, fill = "white") +
+  geom_point(data = grid_data %>% filter(Status == "Established"), aes(x = longitude_rounded, y = latitude_rounded), col = "lightgrey") +
+    geom_sf(data = states, alpha = 0) +
+    geom_point(data = grid_data, aes(x = centroid[1], y = centroid[2]), col = "black", shape = 4, size = 5) +
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 43)) +
+  geom_point(data = Jumps,
+             aes(x = longitude_rounded, y = latitude_rounded, 
+                 col = as.factor(bio_year), group = Rarefied, stroke = Rarefied, shape = Rarefied), size = 3) +
+  scale_discrete_manual(aesthetics = "stroke", values = c('Rarefied' = 1, 'Full' = 2)) +
+  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
+  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_alpha_manual(values = c(0.5, 1)) +
+  labs(x = "Longitude", y = "Latitude") +
+  theme(legend.position="right", text = element_text(size = 10),
+        panel.background = element_rect(fill = "white"),
+        legend.key = element_rect(fill = "white")) +
+   guides(colour = guide_legend("Biological year"), alpha = guide_legend("Dataset"), fill = guide_legend("Biological year"))
+
+map_rarified
+
+ggsave("./figures/vignette_quadrants/jumps_map.jpg", map_rarified, height = 4, width = 4)
+
+library(cowplot)
+fig2 <- ggdraw() +
+  draw_plot(optim_plot, 0, .5, 1, .5) +
+  draw_plot(jumps_plot, 0, 0, .5, .5) +
+  draw_plot(map_rarified, .5, 0, .5, .5) +
+  draw_plot_label(c("(A)", "(B)", "(C)"), c(0, 0, 0.5), c(1, 0.5, 0.5), size = 15)
+fig2
+ggsave("./figures/vignette_quadrants/fig2b.jpg", fig2, height = 10, width = 10)
+
+
+jumps <- plot_grid(jumps_plot, map_rarified, labels=c("A", "B"), ncol = 2, nrow = 1)
+ggsave("./figures/vignette_quadrants/fig2c.jpg", jumps, height = 5, width = 10)
+
+
+
+
+# Fig 2D: mean dist to the threshold per year
+# run and save Results$Dist
+Thresholds <- read.csv("./exported-data/thresholds.csv")
+Thresholds %<>% filter(rotation_nb == 1) %>% 
+  select(longitude_rounded, latitude_rounded, bio_year, sectors_nb) %>% 
+  rename(sectors = sectors_nb,
+         latitude_threshold = latitude_rounded,
+         longitude_threshold = longitude_rounded)
+Thresholds
+
+# Attribute sectors to each jump: find sector for rotation 0
+Jumps
+Jumps %>% filter(Rarefied == TRUE)
+Jumps_sectors <- attribute_sectors(Jumps, nb_sectors = 20, centroid = c(-75.675340, 40.415240), rotation = 1) 
+Jumps_sectors %<>% select(-c(theta.1, sectors)) %>% rename(sectors = rotation1)
+Jumps_sectors %>% filter(Rarefied == TRUE)
+dim(Jumps_sectors)
+
+# Find corresponding threshold per bio year 
+library(purrr)
+JumpLength <- left_join(Jumps_sectors, Thresholds)
+JumpLength %<>% rowwise() %>%  mutate(DistToThreshold = as.vector(distm(c(longitude_rounded, latitude_rounded), c(longitude_threshold, latitude_threshold), fun = distGeo))/1000)
+
+names(JumpLength)   
+JumpLength_tot <- rbind(JumpLength %>% filter(Rarefied == "Rarefied"),
+                        JumpLength %>% mutate(Rarefied = "Full"))
+
+
+MeanDist_jump <- ggplot() +
+  geom_jitter(data = JumpLength,
+             aes(x = as.factor(bio_year), y = DistToThreshold, 
+                 # col = as.factor(bio_year), 
+                 # fill = as.factor(bio_year),
+                 shape = Rarefied), size = 3, show.legend = F) +
+  scale_alpha_manual(values = c(0.8,0)) +
+  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
+  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  labs(x = "Dataset", y = "Distance to the invasion front (km)") +
+  theme_classic() +
+  theme(legend.position="top", text = element_text(size = 10), plot.tag.position = c(0.01, 1)) +
+  guides(fill = "none", shape = "none", alpha = "none")
+MeanDist_jump
+
+
+
+# Same but boxplots
+
+JumpLength_tot$Rarefied <- factor(JumpLength_tot$Rarefied, levels = c("Rarefied", "Full"))
+MeanDist_jump <- ggplot() +
+  geom_boxplot(data = JumpLength %>% filter(Rarefied == "Rarefied"),
+             aes(x = as.factor(bio_year), y = DistToThreshold, 
+                 col = as.factor(bio_year),
+                 fill = as.factor(bio_year),
+                 alpha = Rarefied)) +
+  scale_alpha_manual(values = c(0.7,0)) +
+  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
+  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  labs(x = "Dataset", y = "Distance to the invasion front (km)") +
+  theme_classic() +
+  theme(legend.position="top", text = element_text(size = 10), plot.tag.position = c(0.01, 1)) +
+  guides(fill = "none", shape = "none", col = "none", alpha = "none")
+MeanDist_jump
+
+JumpLength_tot %>% group_by(Rarefied, bio_year) %>% summarise(mean(DistToThreshold))
+
+summary(aov(DistToThreshold ~ bio_year, data = JumpLength))
+ggsave("./figures/vignette_quadrants/distv2.jpg", MeanDist_jump, height = 2.5, width = 4)
+
+
+library(cowplot)
+fig2 <- ggdraw() +
+  draw_plot(map_rarified, x = 0, y = .33, width = 1, height = .66) +
+  draw_plot(jumps_plot, 0, 0, .5, .33) +
+  draw_plot(MeanDist_jump, .5, 0, .5, .33) +
+  draw_plot_label(c("(a)", "(b)", "(c)"), c(0, 0, 0.5), c(1, 0.35, 0.35), size = 15) +
+  theme(plot.background = element_rect(fill="#FFFFFF", color = NA))
+fig2
+ggsave("./figures/vignette_quadrants/fig2h.jpg", fig2, height = 10, width = 10)
+
+
+library(gridExtra)
+lay <- rbind(c(1, 1),
+              c(1, 1),
+              c(2, 3))
+grid.arrange(grobs = list(map_rarified, jumps_plot, MeanDist_jump), 
+             layout_matrix = lay,
+             widths = c(5,5), heights = c(3.33,3.33,3.33))
+
+```
+
+```{r figure total spread/diffusive spread for slf established, fig.cap = "Evolution of the radius of the invasion over time, when diffusive spread and jump dispersal are separated", echo=FALSE, message = FALSE}
+
+#Data on total spread
+
+spread_distances_tab <- grid_data_rotate0 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)) %>%
+  group_by(Status, bio_year, portion) %>% 
+  summarise(MaxDist = max(DistToIntro))
+
+
+spread <- ggplot(data = spread_distances_tab, aes(x = bio_year, y = MaxDist)) +
+  facet_wrap(~portion, ncol = 4) +
+    geom_bar(stat="identity", fill = "white", col = "black") +
+  geom_bar(data = Results_rotate4$Dist, aes(x = bio_year , y = DistToIntro), fill = "grey", col = "black", stat = "identity") +
+  ylab("Invasion radius (km)")+
+  xlab("Year") +
+  theme_classic()
+
+spread
+```
