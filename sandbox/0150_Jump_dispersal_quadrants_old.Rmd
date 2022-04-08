@@ -1,0 +1,1385 @@
+---
+title: "Making the most of invasion records, the case of the spotted lanternfly, part I: isolating jump dispersal and diffusive spread"
+author: 
+- Nadege Belouard^[Temple University, nadege.belouard@temple.edu]
+- Sebastiona De Bona^[Temple University, seba.debona@temple.edu]
+- Jocelyn E. Behm^[Temple University, jebehm@temple.edu]
+- Matthew R. Helmus^[Temple University, mrhelmus@temple.edu]
+date: "1/6/2021"
+output:
+  pdf_document:
+    toc: TRUE
+    toc_depth: 2
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+params:
+  display: FALSE
+  run: TRUE
+  loadfiles: FALSE
+  savefiles: TRUE
+---
+
+```{r setup for rendering, include = F}
+# here we set the images to png, to reduce the size of the output
+# we set some global paramters in the yaml to allow us to switch the chunks
+# of code on and off when displaying
+knitr::opts_chunk$set(dpi = 300, warning = FALSE, message = FALSE, echo = FALSE)
+```
+
+\newpage
+
+# Aim and setup
+
+The dispersal of a species can be autonomous or vectored, and in the case of the spotted lanternfly, it is strongly suspected that human transportation dramatically increases the spread of the species. While most dispersal events occur over short distances and likely result in a continuous invasive range, anthropogenic dispersal promotes the occurrence of dispersal "jumps", and the establishment of satellite populations away from the core of the invasion. Distinguishing diffusive spread and jump dispersal is important to understand the process of invasion, its evolution, but also to take efficient management measures.
+
+The spotted lanternfly, *Lycorma delicatula* (hereafter SLF) is an insect from China that is an invasive pest in the US. Since the initial detection of SLF in Berks County, PA, in 2014, large-scale surveys were conducted to trace the progression of the invasion, resulting in a large amount of detection and non-detection data. A unique dataset summarizing SLF presence and absence in the US was constructed using the package `lycordata`, and constitutes an opportunity to study the spread of the SLF. 
+
+The aim of this first vignette is to differentiate diffusive spread from jump dispersal using a simple and conservative method. We calculated the distance between each detection point and the introduction site. We defined a distance that SLF are unlikely to disperse autonomously - here, 15 kilometers. Then, we looked for gaps larger than 15 kilometers in the distribution of the distance to the introduction site. Every detection of SLF found after such a gap was considered to be a jump event, i.e. an event of anthropogenic dispersal potentially leading to the establishment of a new population, if it is situated at least 15 kilometers away from any previous jump. The threshold of the diffusive spread was considered to be the last positive survey before this gap. Considering that the expansion of the invasion is heterogeneous in space, we divided the invasion into 12 disk portions with the introduction site as the origin, to increase the accuracy of the calculations while keeping the analyses reasonably simple. The optimization of the parameters (gap size, number of disk portions) is described in a companion vignette.
+
+For the sake of homogeneity with other analyses presented, only established populations (detection involving more than one individual, as defined in `lycordata`) will be used in analyses.
+
+## NOTE ##
+Update this vignette with the definitive values for gap size and disk portions from the optimization vignette
+
+
+```{r packages and data, message = FALSE, warning = FALSE, echo = params$display}
+# attaching necessary packages
+library(tidyverse)
+library(magrittr)
+library(sf)
+library(spData)
+library(maps)
+library(DescTools)
+library(ggmap)
+library(reshape2)
+library(geosphere)
+library(ggplot2)
+library(gridExtra)
+library(lycordata)
+library(knitr)
+
+# loading dataset
+load("../../packages/lycordata-main/exported_data/tinyslf.rda")
+slf_tiny <- tinyslf
+
+# The point in south MD is not legitimate (personal communication), we remove it
+slf_tiny <- slf_tiny %>% mutate(index = row.names(slf_tiny))
+# slf_tiny %>% filter(state == "MD", latitude < 38.99, slf_established == TRUE)
+slf_tiny <- slf_tiny %>% filter(index != 281733)
+# BE CAREFUL WHEN THE DATASET IS UPDATED!
+```
+
+
+# 1. Data initialization
+
+## Data reshaping
+
+In `lycordata`, each survey appears in a row, and states whether SLF were present (one individual found) and/or established (more than one individual or an egg mass found). Multiple surveys were conducted at the same location during the same year, resulting in a complex and redundant dataset of `r dim(slf_tiny)[1]` rows (surveys).
+
+```{r show dataset, warnings = FALSE, echo = params$display}
+knitr::kable(head(slf_tiny[,c(3:8)]))
+```
+
+
+We reshape the table to summarize the information by rounding the geographical coordinates to cells of 100 m^2 (100 m * 100 m), so that one line represents the detection status at a given location for a given year. The code is borrowed from Seba De Bona's `lycordata` vignette to homogenize our data.
+
+Note: when several surveys indicate that SLF are "present" the same year at the same location, we could be tempted to categorize them in the "established" category. However, the category "present" often refers to dead individuals, although this information is not explicitly available. We use a conservative approach and kept the same categories while summarizing the data.
+
+```{r rounding coordinates, echo = params$display, warnings = FALSE, message = FALSE, eval = params$run}
+# specifying the width of the mesh, in km
+size_of_grid <- 1
+
+# rounding coordinates and summarizing surveys by location and year
+grid_data <- slf_tiny %>%
+  mutate(latitude_rounded = RoundTo(latitude, multiple = size_of_grid/111),
+         longitude_rounded = RoundTo(longitude, multiple = size_of_grid/85)) %>%
+  group_by(bio_year, latitude_rounded, longitude_rounded) %>%
+  summarise(slf_present = any(slf_present),
+            slf_established = any(slf_established)) %>% 
+  ungroup()
+
+knitr::kable(head(grid_data))
+
+```
+
+The table now has `r dim(grid_data)[1]` rows.
+
+
+## Distances and status calculation
+
+```{r calculate distances to the introduction point, echo = params$display, eval = params$run}
+
+#Coordinates of the introduction site, extracted from Barringer et al. 2015
+centroid <- c(-75.675340, 40.415240)
+
+#Compute distances to the introduction point, in km
+grid_data <- grid_data %>% 
+  mutate(DistToIntro = distm(grid_data[,c(3,2)], centroid, fun=distGeo)/1000)
+
+# Compute a single column with the SLF status at each point: undetected, present, or established
+grid_data <- grid_data %>%
+  mutate(Status = NA)
+
+for (i in 1:length(grid_data$bio_year)) {
+  if (grid_data$slf_established[i]) {
+    grid_data$Status[i] = "Established"
+  } else if (grid_data$slf_present[i]) {
+    grid_data$Status[i] = "Present"
+  } else {
+    grid_data$Status[i] = "Undetected"
+  }
+}
+
+# Put levels of Status in correct order for plots
+grid_data$Status <- factor(grid_data$Status, levels = c("Undetected", "Present", "Established"))
+```
+
+We first calculate the distance between each survey point and the introduction point (-75.675340, 40.415240, from Barringer et al., 2015). This distance will be the basis of all subsequent analyses. The summary of this distance is (in kilometers):  
+`r summary(grid_data$DistToIntro)`
+We also create a variable summarizing the status of the survey for each point: SLF `r levels(grid_data$Status)`.
+
+
+## Space division
+
+We divide the invasion records into 8 disk portions to increase the accuracy of subsequent calculations.
+
+```{r function: distinguish disk portions, echo = params$display, warnings = FALSE, eval = params$run}
+
+# Determine disk portions based on trigonometry
+# A full circle is 2*pi
+# The disk portion of each point is determined by atan2(y,x), the angle of the point relative to the horizontal line of the introduction site
+
+attribute_disk_portions <- function(dataset, nb_slices = 8, centroid = c(-75.675340, 40.415240), rotation = 1) {
+  
+  # Calculate theta, the angle between the point and the horizontal line, for each point
+  x = NULL
+  y = NULL
+  # dataset$theta <- NA
+  # grid_data <- dataset
+  grid_data <- dataset %>% add_column(theta = NA)
+
+  for (i in 1:length(grid_data$longitude_rounded)) {
+    x = grid_data$longitude_rounded[i] - centroid[1]
+    y = grid_data$latitude_rounded[i] - centroid[2]
+    grid_data$theta[i] = base::atan2(y,x) + pi
+  }
+
+  # Create a variables for the angle
+  angle_portion = 2*pi/nb_slices
+  p = angle_portion/rotation
+  # Attribute the right disk portion number
+  for (i in 0:(rotation-1)){
+    grid_data <- grid_data %>% mutate(thetanew = theta - p*i,
+                                      thetanew = ifelse(thetanew < 0, thetanew + 2*pi, thetanew),
+                                      portion = ceiling((thetanew)/angle_portion)) %>%
+      dplyr::select(-thetanew) %>% 
+      rename(!!quo_name(paste("rotation", i+1, sep = "")) := portion)
+  }
+  
+  return(grid_data)
+}
+
+```
+
+
+
+```{r run function to attribute portions, echo = params$display, eval = params$run}
+centroid <- c(-75.675340, 40.415240)
+
+# 8 disk portions
+grid_data_DP8 <- attribute_disk_portions(grid_data, nb_slices = 8, centroid = centroid, rotation = 10)
+
+# 12 disk portions
+grid_data_DP12 <- attribute_disk_portions(grid_data, nb_slices = 12, centroid = centroid, rotation = 10)
+
+# 16 disk portions
+grid_data_DP16 <- attribute_disk_portions(grid_data, nb_slices = 16, centroid = centroid, rotation = 10)
+
+# 20 disk portions
+grid_data_DP20 <- attribute_disk_portions(grid_data, nb_slices = 20, centroid = centroid, rotation = 10)
+
+grid_data_allrotations_DP8_12_16_20 <- bind_rows(grid_data_DP8 %>%  add_column(diskportions = 8), 
+                            grid_data_DP12 %>%  add_column(diskportions = 12), 
+                            grid_data_DP16 %>%  add_column(diskportions = 16),
+                            grid_data_DP20 %>%  add_column(diskportions = 20))
+
+write.csv(grid_data_allrotations_DP8_12_16_20, "../exported-data/grid_data_4DP.csv", row.names = F)
+```
+
+
+All surveys with established SLF are represented on a map (Figure 1), colored by disk portions.
+
+```{r states names and centroid for global map, message = FALSE, warning = FALSE, echo = params$display}
+# extracts a map of the States and recodes state labels to show the two-letter code rather than the full state name.
+
+# obtaining simple feature objects for states and finding centroids for label positioning
+states <- sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
+states <- cbind(states, st_coordinates(st_centroid(states)))
+
+# making table key for state 2-letter abbreviations
+# the vectors state.abb and state.name contains strings of all
+# US states and abbreviations
+state_abbr <- tibble(state.name = str_to_lower(state.name), state.abb) %>% 
+  left_join(tibble(ID = states$ID), ., by = c(ID = "state.name")) %>% 
+  mutate(state.abb = replace_na(state.abb, ""))
+
+# adding 2-letter codes to sf
+states$code <- state_abbr$state.abb
+``` 
+
+
+```{r map of 8-12-16 disk portions, fig.cap = "Map of surveys with established SLF colored by disk portion (2014-2020)", fig.height = 6, fig.width = 8, warning = F, echo = params$display}
+
+centroid <- c(long = -75.675340, lat = 40.415240)
+
+grid_data_DP <- bind_rows(grid_data_DP8_rotate0 %>%  add_column(diskportions = "8 disk portions"), 
+                            grid_data_DP12_rotate0 %>%  add_column(diskportions = "12 disk portions"), 
+                            grid_data_DP16_rotate0 %>%  add_column(diskportions = "16 disk portions"))
+grid_data_DP$diskportions <- factor(grid_data_DP$diskportions, levels = c("8 disk portions", "12 disk portions", "16 disk portions"))
+
+map_8_12_16diskportions <-  ggplot(data = states) +
+  geom_point(data = grid_data_DP %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(portion)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 4))) +
+  geom_point(data = grid_data_DP8_rotate0,
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  geom_sf(data = states, alpha = 0) + 
+  facet_wrap(~diskportions, ncol = 3) +
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Disk portions")
+
+ggsave("../figures/vignette_quadrants/map_8-12-16diskportions.jpg", map_8_12_16diskportions, width = 15, height = 6)
+
+map_12diskportions <-  ggplot(data = states) +
+  geom_point(data = grid_data_DP12_rotate0 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(portion)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 4))) +
+  geom_point(data = grid_data_DP8_rotate0,
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Disk portions")
+
+ggsave("../figures/vignette_quadrants/map_12diskportions.jpg", map_12diskportions, width = 6, height = 6)
+
+
+map_8diskportions <-  ggplot(data = states) +
+  geom_point(data = grid_data_DP8_rotate0 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(portion)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 4))) +
+  geom_point(data = grid_data_DP8_rotate0,
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Disk portions")
+
+ggsave("../figures/vignette_quadrants/map_8diskportions.jpg", map_8diskportions, width = 6, height = 6)
+
+
+map_16diskportions <-  ggplot(data = states) +
+  geom_point(data = grid_data_DP16_rotate0 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(portion)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 4))) +
+  geom_point(data = grid_data_DP8_rotate0,
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Disk portions")
+
+ggsave("../figures/vignette_quadrants/map_16diskportions.jpg", map_16diskportions, width = 6, height = 6)
+```
+
+
+
+```{r map of of disk portions for each number of disk portions, fig.cap = "Map of surveys with established SLF colored by disk portion (2014-2020)", fig.height = 6, fig.width = 8, warning = F, echo = params$display}
+
+grid_data_DP8 <- bind_rows(grid_data_DP8_rotate0 %>%  add_column(rotation = 0), 
+                            grid_data_DP8_rotate1 %>%  add_column(rotation = 1), 
+                            grid_data_DP8_rotate2 %>%  add_column(rotation = 2),
+                            grid_data_DP8_rotate3 %>%  add_column(rotation = 3), 
+                            grid_data_DP8_rotate4 %>%  add_column(rotation = 4), 
+                            grid_data_DP8_rotate5 %>%  add_column(rotation = 5),
+                            grid_data_DP8_rotate6 %>%  add_column(rotation = 6),
+                            grid_data_DP8_rotate7 %>%  add_column(rotation = 7), 
+                            grid_data_DP8_rotate8 %>%  add_column(rotation = 8),
+                            grid_data_DP8_rotate9 %>%  add_column(rotation = 9))
+
+map_8diskportions_wrap <-  ggplot(data = states) +
+  geom_point(data = grid_data_DP8 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(portion)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 2))) +
+  geom_point(data = grid_data_DP8,
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  geom_sf(data = states, alpha = 0) + 
+  facet_wrap(~rotation, ncol = 5) +
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Disk portions")
+
+ggsave("../figures/vignette_quadrants/diskportions_map/map_8diskportions.jpg", map_8diskportions_wrap, width = 15, height = 6)
+
+
+grid_data_DP12 <- bind_rows(grid_data_DP12_rotate0 %>%  add_column(rotation = 0), 
+                            grid_data_DP12_rotate1 %>%  add_column(rotation = 1), 
+                            grid_data_DP12_rotate2 %>%  add_column(rotation = 2),
+                            grid_data_DP12_rotate3 %>%  add_column(rotation = 3), 
+                            grid_data_DP12_rotate4 %>%  add_column(rotation = 4), 
+                            grid_data_DP12_rotate5 %>%  add_column(rotation = 5),
+                            grid_data_DP12_rotate6 %>%  add_column(rotation = 6),
+                            grid_data_DP12_rotate7 %>%  add_column(rotation = 7), 
+                            grid_data_DP12_rotate8 %>%  add_column(rotation = 8),
+                            grid_data_DP12_rotate9 %>%  add_column(rotation = 9))
+
+map_12diskportions_wrap <-  ggplot(data = states) +
+  geom_point(data = grid_data_DP12 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(portion)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 3))) +
+  geom_point(data = grid_data_DP12,
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  geom_sf(data = states, alpha = 0) + 
+  facet_wrap(~rotation, ncol = 5) +
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Disk portions")
+
+ggsave("../figures/vignette_quadrants/diskportions_map/map_12diskportions.jpg", map_12diskportions_wrap, width = 15, height = 6)
+
+
+grid_data_DP16 <- bind_rows(grid_data_DP16_rotate0 %>%  add_column(rotation = 0), 
+                            grid_data_DP16_rotate1 %>%  add_column(rotation = 1), 
+                            grid_data_DP16_rotate2 %>%  add_column(rotation = 2),
+                            grid_data_DP16_rotate3 %>%  add_column(rotation = 3), 
+                            grid_data_DP16_rotate4 %>%  add_column(rotation = 4), 
+                            grid_data_DP16_rotate5 %>%  add_column(rotation = 5),
+                            grid_data_DP16_rotate6 %>%  add_column(rotation = 6),
+                            grid_data_DP16_rotate7 %>%  add_column(rotation = 7), 
+                            grid_data_DP16_rotate8 %>%  add_column(rotation = 8),
+                            grid_data_DP16_rotate9 %>%  add_column(rotation = 9))
+
+map_16diskportions_wrap <-  ggplot(data = states) +
+  geom_point(data = grid_data_DP16 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(portion)), 
+             shape = 19, size = 2, show.legend=F) +
+  scale_color_manual(values=c(rep(c("lightblue", "yellow", "green", "pink"), 4))) +
+  geom_point(data = grid_data_DP16,
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  geom_sf(data = states, alpha = 0) + 
+  facet_wrap(~rotation, ncol = 5) +
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Disk portions")
+
+ggsave("../figures/vignette_quadrants/diskportions_map/map_16diskportions.jpg", map_16diskportions_wrap, width = 15, height = 6)
+
+
+```
+
+```{r save grid_data files}
+grid_data_allrotations_DP8_12_16 <- bind_rows(grid_data_DP8 %>%  add_column(diskportions = 8), 
+                            grid_data_DP12 %>%  add_column(diskportions = 12), 
+                            grid_data_DP16 %>%  add_column(diskportions = 16))
+
+write.csv(grid_data_allrotations_DP8_12_16, "../exported-data/grid_data_3DP_10rotations.csv", row.names = F)
+```
+
+\newpage
+
+
+
+# 2. Yearly radius of the invasion
+
+To estimate the spread of the SLF, we extract for each year the radius of the invasion, defined as the maximum distance of a survey with established SLF to the introduction point. Median or mean distances are not informative here because surveys are preferentially conducted towards the invasion front, and thus bias the distribution of distances.
+
+```{r advance of the invasion, fig.cap = "Yearly radius of the invasion", fig.height = 5, fig.width = 9, warning = F, echo = params$display, message = FALSE}
+
+#Computes the maximum distance to the introduction site for each year, status and quadrant
+advance_tab <- grid_data_DP12_rotate0 %>% filter(Status == "Established" & bio_year != 2021) %>%
+  group_by(Status, bio_year, portion_name) %>% 
+  summarise(MaxDist = max(DistToIntro))
+
+# same thing but in a figure
+advance_graph <- ggplot(data = advance_tab, aes(x = bio_year , y = MaxDist)) +
+  geom_bar(stat="identity", fill = "darkgrey", col = "black") +
+  ylab("Invasion radius (km)")+
+  # ylim(c(0,1000)) +
+  xlab("Year") +
+  facet_wrap(~portion_name, ncol = 4) +
+  theme_classic()
+
+advance_graph
+
+```
+
+```{r save graph advance radius, eval = params$savefiles, echo = params$display}
+ggsave("../figures/vignette_quadrants/advance_graph.jpg", advance_graph, width = 8, height = 6)
+```
+
+The invasion radius increased regularly until 2017 (Figure 2). From 2018, there is a steep increase in the invasion radius, especially in the westernmost disk portions, denoting the apparition of dispersal jumps. Note that in 2020, the invasion radius did not increase dramatically, and even decreased in the NNE and ESE portions. This might be due to fewer surveys being conducted that year because of the covid19 pandemic, or be an actual biological pattern. The accuracy of these values can be investigated by checking whether negative surveys are found further than positive surveys, to make sure that SLF were not missed.
+
+
+\newpage
+
+
+
+# 3. Differentiating diffusive spread and jump dispersal
+
+## Exploration of histograms of distances to the introduction site
+
+Let's have a look at the distribution of the distances of positive vs negative surveys to the introduction point (Figure 3).
+
+```{r histogram of spread distances per year, fig.cap = "Distribution of the distance between SLF populations and the introduction site, per disk portion and per year", fig.height = 20, fig.width = 20, warning = F, echo = params$display}
+grid_data$Status <- factor(grid_data_rotate0$Status, levels = c("Undetected", "Present", "Established"))
+
+histogram_distances <- ggplot(data = grid_data_rotate0 %>% filter(bio_year %in% c(2015:2020), Status != "Present"), aes(x = DistToIntro)) + 
+  geom_histogram(aes(x = DistToIntro, fill = Status),
+                 breaks = seq(0,500,10)) +
+  facet_wrap(~portion_name + bio_year, ncol = 6) +
+  scale_fill_manual(values = c("grey", "red")) +
+  xlab("Distance from the introduction site (km)") +
+  ylab("Number of survey locations") +
+  theme(plot.title = element_text(hjust = 0.5, size = 12), legend.position = "top")
+
+histogram_distances
+```
+
+
+
+```{save map disk portions, eval = params$savefiles, echo = params$display}
+ggsave("../figures/vignette_quadrants/histogram_distances.jpg", histogram_distances, width = 20, height = 20)
+```
+
+The fact that surveys with SLF undetected are always recorded further than detection events indicates that we can be be fairly confident that the spread of the SLF is accurately monitored. It is also the case in 2020 in the NNE and ESE portions. We can also see that the distribution of established populations is sometimes discontinuous, with gaps where populations were not detected. Detections that appear after the first gap are likely the result of jump dispersal, i.e. human-vectored transportation of SLF in new locations (secondary introductions). 
+
+We can further understand the yearly spread of the SLF by distinguishing diffusive spread (the continuous progress of the invasion) and jump dispersal (long-distance, human-vectored dispersal). We calculated, for each year, the limit of diffusive spread by finding the first 10-mile gap in the distribution of the distances to the introduction site. 
+
+
+
+## Function differentiating diffusive spread and jump dispersal
+
+A custom program searches for each year the distance at which the gap occurs, and returns both the survey before this threshold (the limit of diffusive spread) and a list of surveys found after this threshold (jump events).   
+* Note that here, we consider that populations do not go extinct, so that the limit of the diffusive spread cannot be lower in year y than in year y+1. This is because fewer and fewer surveys are conducted near the introduction site over time, leading to the appearance of a false first gap near the introduction site (see Figure 3, surveys are shifted on the right in 2019 and 2020).  
+* If a jump event is identified closer than 10 miles to a jump from the previous year, it is removed from the list, as SLF likely spread from the jump of the previous year.
+* The function runs independently for each disk portion, generating false-positive and false-negative (see troubleshooting with disk rotation).
+
+
+```{r program that runs this function for each quadrant and year}
+
+threshold_jump_multiple_num <- function(dataset, 
+                                    portion = seq(1:8), 
+                                    bio_year = c(2014:2020), 
+                                    gap_size = 10) {
+  
+  #Initialize variables for the results
+  Dist = NULL
+  Jumps_all = NULL
+
+  for (p in portion){
+    dataset_n = NULL
+    jumpers_portion = data.frame(DistToIntro = 0)
+    for (y in bio_year){
+     assign(paste0(p,"_", y), y)
+      
+      #Select the dataset. We assume that no population is going extinct over the years and cumulate datasets.
+      dataset_n <- rbind(dataset_n, dataset %>% filter(portion == p & bio_year == y & Status == "Established"))
+      
+      if (dim(dataset_n)[1] == 0){
+        next
+      }
+ 
+      # Initialize values
+      i = 1
+      distancei = 1
+      j = 2
+      distancej = 2
+    
+      # Order the variable by increasing order
+      distance_sorted <- sort(dataset_n$DistToIntro) 
+  
+      # Loop until it finds the threshold or until the variable is finished
+      while ( (distancei + gap_size > distancej) & (j <= length(distance_sorted)) ) { 
+        distancei = distance_sorted[i]
+        distancej = distance_sorted[j]
+        i = i+1
+        j = j+1
+        }
+  
+      if (distancei + gap_size > distancej) { # there is no jump
+        threshold = distance_sorted[i]
+        } else { #a jump was found, take the previous iteration
+        threshold = distance_sorted[i-1]
+        }
+      
+      #Find the threshold survey in the initial table (not ordered)
+      rowNumber = which(grepl(threshold, dataset_n$DistToIntro))
+  
+      #Store results in objects
+      threshold_survey = dataset_n[rowNumber,]
+      
+      # Make sure the threshold is associated to the correct year, even if the threshold is the same as the year before
+      threshold_survey$bio_year <- y
+      jump_survey = dataset_n %>% filter(DistToIntro > threshold & bio_year == y)
+      
+       # Add results at each iteration
+      Dist = rbind(Dist, threshold_survey)
+      jumpers_portion = dplyr::bind_rows(jumpers_portion, jump_survey)
+      }
+    Jumps_all = rbind(Jumps_all, jumpers_portion[-1,])
+    }
+
+  # Are surveys in the list of jump surveys real new jumps or just diffusion of secondary introductions from the previous year?
+  # i.e. are new jumpers less than 10 miles from a previous jump?
+  # we run that second part on the whole dataset, not within disk portions, to avoid the occurrence of false-positive)
+
+  jumps_previousyears = NULL
+  Jumps = NULL
+
+  for (y in bio_year[1:length(bio_year)-1]){
+    jumps_previousyears <- rbind(jumps_previousyears, Jumps_all %>% filter(bio_year == y))
+    jumps_newyear <- Jumps_all %>% filter(bio_year == y+1) %>% mutate(DistToJump = NA)
+
+  if (dim(jumps_previousyears)[1] == 0 | dim(jumps_newyear)[1] == 0){
+    Jumps = rbind(Jumps, jumps_newyear)
+  } else {
+    # Create shapefiles with the two sets of points
+    jumps_previousyears_layer <- st_as_sf(x = jumps_previousyears, coords = c("longitude_rounded", "latitude_rounded"), crs = 4326, remove = F)
+    jumps_previousyears_proj <- st_transform(jumps_previousyears_layer, crs = 4326)
+
+    jumps_newyear_layer <- st_as_sf(x = jumps_newyear, coords = c("longitude_rounded", "latitude_rounded"), crs = 4326, remove = F)
+    jumps_newyear_proj <- st_transform(jumps_newyear_layer, crs = 4326)
+
+    #Calculate their pairwise distances
+    for (jump in 1:length(jumps_newyear_proj$DistToJump)){
+      pairwise_dist <- st_distance(x = jumps_newyear_proj[jump,], y = jumps_previousyears_proj)
+      jumps_newyear_proj$DistToJump[jump] <- min(pairwise_dist)
+  }
+
+    #Select those 10 miles apart
+    Jumps = bind_rows(Jumps, jumps_newyear_proj %>% filter(DistToJump > gap_size*1000))
+    }
+  }
+
+  results <- list("Dist" = Dist, "Jump" = Jumps)
+  
+  return(results)
+} 
+
+``` 
+
+
+```{r test of the program, eval = FALSE}
+
+test <- threshold_jump_multiple_num(grid_data_rotate0, gap_size = 16, bio_year = c(2014:2020))
+table(test$Jump$bio_year)
+
+#Graphical verification
+spread_distances <- ggplot(data = grid_data %>% filter(Status == "Established" & portion == 8), aes(x = DistToIntro)) + 
+  geom_histogram(aes(fill = Status), 
+                 breaks = seq(0,100,5)) +
+  xlab("Distance from the introduction site (km)") +
+  ylab("Number of survey locations") +
+  ggtitle("Histogram of distances to the introduction site")+
+  theme(plot.title = element_text(hjust = 0.5, size=12), legend.position = "top")
+
+# BEWARE: this program only works for established pops!
+# If we want to consider all individuals, the code must be adapted so that the list of jumpers is established within present + established pops, not only present.
+```
+
+
+Here, the program is run with a gap of 10 miles (16 km), from 2014 to 2020, and for 8 disk portions.
+
+```{r run the program, echo = params$display, eval = params$run}
+
+# Run the program on 8 portions, all years, gap size of 10 miles
+i = 16
+Results_DP8_GS16_rotate0 <- threshold_jump_multiple_num(grid_data_DP8_rotate0, gap_size = i, bio_year = c(2014:2020))
+
+i = 15
+Results_DP8_GS15_rotate0 <- threshold_jump_multiple_num(grid_data_DP8_rotate0, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS15_rotate1 <- threshold_jump_multiple_num(grid_data_DP8_rotate1, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS15_rotate2 <- threshold_jump_multiple_num(grid_data_DP8_rotate2, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS15_rotate3 <- threshold_jump_multiple_num(grid_data_DP8_rotate3, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS15_rotate4 <- threshold_jump_multiple_num(grid_data_DP8_rotate4, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS15_rotate5 <- threshold_jump_multiple_num(grid_data_DP8_rotate5, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS15_rotate6 <- threshold_jump_multiple_num(grid_data_DP8_rotate6, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS15_rotate7 <- threshold_jump_multiple_num(grid_data_DP8_rotate7, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS15_rotate8 <- threshold_jump_multiple_num(grid_data_DP8_rotate8, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS15_rotate9 <- threshold_jump_multiple_num(grid_data_DP8_rotate9, gap_size = i, bio_year = c(2014:2020))
+
+Results_DP12_GS15_rotate0 <- threshold_jump_multiple_num(grid_data_DP12_rotate0, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS15_rotate1 <- threshold_jump_multiple_num(grid_data_DP12_rotate1, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS15_rotate2 <- threshold_jump_multiple_num(grid_data_DP12_rotate2, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS15_rotate3 <- threshold_jump_multiple_num(grid_data_DP12_rotate3, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS15_rotate4 <- threshold_jump_multiple_num(grid_data_DP12_rotate4, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS15_rotate5 <- threshold_jump_multiple_num(grid_data_DP12_rotate5, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS15_rotate6 <- threshold_jump_multiple_num(grid_data_DP12_rotate6, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS15_rotate7 <- threshold_jump_multiple_num(grid_data_DP12_rotate7, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS15_rotate8 <- threshold_jump_multiple_num(grid_data_DP12_rotate8, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS15_rotate9 <- threshold_jump_multiple_num(grid_data_DP12_rotate9, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+
+Results_DP16_GS15_rotate0 <- threshold_jump_multiple_num(grid_data_DP16_rotate0, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS15_rotate1 <- threshold_jump_multiple_num(grid_data_DP16_rotate1, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS15_rotate2 <- threshold_jump_multiple_num(grid_data_DP16_rotate2, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS15_rotate3 <- threshold_jump_multiple_num(grid_data_DP16_rotate3, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS15_rotate4 <- threshold_jump_multiple_num(grid_data_DP16_rotate4, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS15_rotate5 <- threshold_jump_multiple_num(grid_data_DP16_rotate5, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS15_rotate6 <- threshold_jump_multiple_num(grid_data_DP16_rotate6, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS15_rotate7 <- threshold_jump_multiple_num(grid_data_DP16_rotate7, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS15_rotate8 <- threshold_jump_multiple_num(grid_data_DP16_rotate8, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS15_rotate9 <- threshold_jump_multiple_num(grid_data_DP16_rotate9, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+
+
+
+i = 10
+Results_DP8_GS10_rotate0 <- threshold_jump_multiple_num(grid_data_DP8_rotate0, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS10_rotate1 <- threshold_jump_multiple_num(grid_data_DP8_rotate1, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS10_rotate2 <- threshold_jump_multiple_num(grid_data_DP8_rotate2, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS10_rotate3 <- threshold_jump_multiple_num(grid_data_DP8_rotate3, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS10_rotate4 <- threshold_jump_multiple_num(grid_data_DP8_rotate4, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS10_rotate5 <- threshold_jump_multiple_num(grid_data_DP8_rotate5, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS10_rotate6 <- threshold_jump_multiple_num(grid_data_DP8_rotate6, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS10_rotate7 <- threshold_jump_multiple_num(grid_data_DP8_rotate7, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS10_rotate8 <- threshold_jump_multiple_num(grid_data_DP8_rotate8, gap_size = i, bio_year = c(2014:2020))
+Results_DP8_GS10_rotate9 <- threshold_jump_multiple_num(grid_data_DP8_rotate9, gap_size = i, bio_year = c(2014:2020))
+
+Results_DP12_GS10_rotate0 <- threshold_jump_multiple_num(grid_data_DP12_rotate0, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS10_rotate1 <- threshold_jump_multiple_num(grid_data_DP12_rotate1, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS10_rotate2 <- threshold_jump_multiple_num(grid_data_DP12_rotate2, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS10_rotate3 <- threshold_jump_multiple_num(grid_data_DP12_rotate3, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS10_rotate4 <- threshold_jump_multiple_num(grid_data_DP12_rotate4, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS10_rotate5 <- threshold_jump_multiple_num(grid_data_DP12_rotate5, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS10_rotate6 <- threshold_jump_multiple_num(grid_data_DP12_rotate6, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS10_rotate7 <- threshold_jump_multiple_num(grid_data_DP12_rotate7, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS10_rotate8 <- threshold_jump_multiple_num(grid_data_DP12_rotate8, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+Results_DP12_GS10_rotate9 <- threshold_jump_multiple_num(grid_data_DP12_rotate9, gap_size = i, bio_year = c(2014:2020), portion = seq(1:12))
+
+Results_DP16_GS10_rotate0 <- threshold_jump_multiple_num(grid_data_DP16_rotate0, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS10_rotate1 <- threshold_jump_multiple_num(grid_data_DP16_rotate1, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS10_rotate2 <- threshold_jump_multiple_num(grid_data_DP16_rotate2, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS10_rotate3 <- threshold_jump_multiple_num(grid_data_DP16_rotate3, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS10_rotate4 <- threshold_jump_multiple_num(grid_data_DP16_rotate4, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS10_rotate5 <- threshold_jump_multiple_num(grid_data_DP16_rotate5, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS10_rotate6 <- threshold_jump_multiple_num(grid_data_DP16_rotate6, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS10_rotate7 <- threshold_jump_multiple_num(grid_data_DP16_rotate7, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS10_rotate8 <- threshold_jump_multiple_num(grid_data_DP16_rotate8, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+Results_DP16_GS10_rotate9 <- threshold_jump_multiple_num(grid_data_DP16_rotate9, gap_size = i, bio_year = c(2014:2020), portion = seq(1:16))
+
+```
+
+
+```{r load results files, eval = params$loadfiles, echo = params$display}
+# Results <- NULL
+# Results$Jump <- read.csv("../exported-data/jumpers_10miles_8portions.csv")
+# Results$Dist <- read.csv("../exported-data/limits_diffusive_spread_10miles_8portions.csv")
+# Results$Dist$portion_name <- factor(Results$Dist$portion_name, levels = c("WNW", "NNW", "NNE", "ENE", "WSW", "SSW", "SSE", "ESE"))
+```
+
+
+
+
+
+\newpage
+
+
+# 4. Results 
+
+
+## Threshold locations found per year (with rotations)
+
+
+```{r bind threshold datasets}
+Thresholds_DP8_GS10 <- bind_rows(Results_DP8_GS10_rotate0$Dist %>% add_column(rotation = 0),
+                                 Results_DP8_GS10_rotate1$Dist %>% add_column(rotation = 1),
+                                 Results_DP8_GS10_rotate2$Dist %>% add_column(rotation = 2),
+                                 Results_DP8_GS10_rotate3$Dist %>% add_column(rotation = 3),
+                                 Results_DP8_GS10_rotate4$Dist %>% add_column(rotation = 4),
+                                 Results_DP8_GS10_rotate5$Dist %>% add_column(rotation = 5),
+                                 Results_DP8_GS10_rotate6$Dist %>% add_column(rotation = 6),
+                                 Results_DP8_GS10_rotate7$Dist %>% add_column(rotation = 7),
+                                 Results_DP8_GS10_rotate8$Dist %>% add_column(rotation = 8),
+                                 Results_DP8_GS10_rotate9$Dist %>% add_column(rotation = 9))
+
+Thresholds_DP8_GS15 <- bind_rows(Results_DP8_GS15_rotate0$Dist %>% add_column(rotation = 0),
+                                 Results_DP8_GS15_rotate1$Dist %>% add_column(rotation = 1),
+                                 Results_DP8_GS15_rotate2$Dist %>% add_column(rotation = 2),
+                                 Results_DP8_GS15_rotate3$Dist %>% add_column(rotation = 3),
+                                 Results_DP8_GS15_rotate4$Dist %>% add_column(rotation = 4),
+                                 Results_DP8_GS15_rotate5$Dist %>% add_column(rotation = 5),
+                                 Results_DP8_GS15_rotate6$Dist %>% add_column(rotation = 6),
+                                 Results_DP8_GS15_rotate7$Dist %>% add_column(rotation = 7),
+                                 Results_DP8_GS15_rotate8$Dist %>% add_column(rotation = 8),
+                                 Results_DP8_GS15_rotate9$Dist %>% add_column(rotation = 9))
+
+Thresholds_DP12_GS10 <- bind_rows(Results_DP12_GS10_rotate0$Dist %>% add_column(rotation = 0),
+                                 Results_DP12_GS10_rotate1$Dist %>% add_column(rotation = 1),
+                                 Results_DP12_GS10_rotate2$Dist %>% add_column(rotation = 2),
+                                 Results_DP12_GS10_rotate3$Dist %>% add_column(rotation = 3),
+                                 Results_DP12_GS10_rotate4$Dist %>% add_column(rotation = 4),
+                                 Results_DP12_GS10_rotate5$Dist %>% add_column(rotation = 5),
+                                 Results_DP12_GS10_rotate6$Dist %>% add_column(rotation = 6),
+                                 Results_DP12_GS10_rotate7$Dist %>% add_column(rotation = 7),
+                                 Results_DP12_GS10_rotate8$Dist %>% add_column(rotation = 8),
+                                 Results_DP12_GS10_rotate9$Dist %>% add_column(rotation = 9))
+
+Thresholds_DP12_GS15 <- bind_rows(Results_DP12_GS15_rotate0$Dist %>% add_column(rotation = 0),
+                                 Results_DP12_GS15_rotate1$Dist %>% add_column(rotation = 1),
+                                 Results_DP12_GS15_rotate2$Dist %>% add_column(rotation = 2),
+                                 Results_DP12_GS15_rotate3$Dist %>% add_column(rotation = 3),
+                                 Results_DP12_GS15_rotate4$Dist %>% add_column(rotation = 4),
+                                 Results_DP12_GS15_rotate5$Dist %>% add_column(rotation = 5),
+                                 Results_DP12_GS15_rotate6$Dist %>% add_column(rotation = 6),
+                                 Results_DP12_GS15_rotate7$Dist %>% add_column(rotation = 7),
+                                 Results_DP12_GS15_rotate8$Dist %>% add_column(rotation = 8),
+                                 Results_DP12_GS15_rotate9$Dist %>% add_column(rotation = 9))
+
+Thresholds_DP16_GS10 <- bind_rows(Results_DP16_GS10_rotate0$Dist %>% add_column(rotation = 0),
+                                 Results_DP16_GS10_rotate1$Dist %>% add_column(rotation = 1),
+                                 Results_DP16_GS10_rotate2$Dist %>% add_column(rotation = 2),
+                                 Results_DP16_GS10_rotate3$Dist %>% add_column(rotation = 3),
+                                 Results_DP16_GS10_rotate4$Dist %>% add_column(rotation = 4),
+                                 Results_DP16_GS10_rotate5$Dist %>% add_column(rotation = 5),
+                                 Results_DP16_GS10_rotate6$Dist %>% add_column(rotation = 6),
+                                 Results_DP16_GS10_rotate7$Dist %>% add_column(rotation = 7),
+                                 Results_DP16_GS10_rotate8$Dist %>% add_column(rotation = 8),
+                                 Results_DP16_GS10_rotate9$Dist %>% add_column(rotation = 9))
+
+Thresholds_DP16_GS15 <- bind_rows(Results_DP16_GS15_rotate0$Dist %>% add_column(rotation = 0),
+                                 Results_DP16_GS15_rotate1$Dist %>% add_column(rotation = 1),
+                                 Results_DP16_GS15_rotate2$Dist %>% add_column(rotation = 2),
+                                 Results_DP16_GS15_rotate3$Dist %>% add_column(rotation = 3),
+                                 Results_DP16_GS15_rotate4$Dist %>% add_column(rotation = 4),
+                                 Results_DP16_GS15_rotate5$Dist %>% add_column(rotation = 5),
+                                 Results_DP16_GS15_rotate6$Dist %>% add_column(rotation = 6),
+                                 Results_DP16_GS15_rotate7$Dist %>% add_column(rotation = 7),
+                                 Results_DP16_GS15_rotate8$Dist %>% add_column(rotation = 8),
+                                 Results_DP16_GS15_rotate9$Dist %>% add_column(rotation = 9))
+
+
+Thresholds <- bind_rows(Thresholds_DP8_GS10 %>% add_column(params = "DP8GS10"),
+                        Thresholds_DP8_GS15 %>% add_column(params = "DP8GS15"),
+                        Thresholds_DP12_GS10 %>% add_column(params = "DP12GS10"),
+                        Thresholds_DP12_GS15 %>% add_column(params = "DP12GS15"),
+                        Thresholds_DP16_GS10 %>% add_column(params = "DP16GS10"),
+                        Thresholds_DP16_GS15 %>% add_column(params = "DP16GS15"))
+
+write.csv(Thresholds, "../exported-data/thresholds_3DP_10rotations.csv", row.names = F)
+
+Thresholds$params <- factor(Thresholds$params, levels = c("DP8GS10", "DP12GS10", "DP16GS10",
+                                                              "DP8GS15", "DP12GS15", "DP16GS15"))
+```
+
+
+```{r map of threshold points per year per rotation, fig.cap = "Map of SLF jumps", fig.height=6, fig.width=10}
+map_thresholds2016 <- ggplot(data = states) +
+  geom_point(data = grid_data_DP12_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2016)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP12_rotate0 %>%  filter(bio_year == 2016),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2016), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2016.jpg", map_thresholds2016 , width = 15, height = 10)
+
+
+map_thresholds2017 <- ggplot(data = states) +
+  geom_point(data = grid_data_DP12_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2017)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP12_rotate0 %>%  filter(bio_year == 2017),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2017), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2017.jpg", map_thresholds2017 , width = 15, height = 10)
+
+
+map_thresholds2018 <- ggplot(data = states) +
+  geom_point(data = grid_data_DP12_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2018)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP12_rotate0 %>%  filter(bio_year == 2018),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2018), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2018.jpg", map_thresholds2018 , width = 15, height = 10)
+
+
+
+map_thresholds2019 <- ggplot(data = states) +
+  geom_point(data = grid_data_DP16_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2019)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP16_rotate0 %>%  filter(bio_year == 2019),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2019), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2019.jpg", map_thresholds2019 , width = 15, height = 10)
+
+
+
+map_thresholds2020 <- ggplot(data = states) +
+  geom_point(data = grid_data_DP16_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP16_rotate0 %>%  filter(bio_year == 2020),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2020), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_2020.jpg", map_thresholds2020 , width = 15, height = 10)
+
+
+
+map_thresholds_gap16 <- ggplot(data = states) +
+  geom_point(data = grid_data_DP16_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2018)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP16_rotate0,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Results_DP8_GS16_rotate0$Dist %>%  filter(bio_year == 2018), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_thresholds_gap16km.jpg", map_thresholds_gap16 , width = 6, height = 6)
+
+```
+
+
+
+## Jump locations
+
+The 82 jump events found by the function can be visualized on a map (Figure 4). Jump locations are colored according to their year of appearance, among all the established populations in grey. The introduction site is signaled by a blue cross. We note that most jump events occur in northern Virginia or western Pennsylvania. In Winchester (VA), a diffusive spread appears around jump events, indicating that a secondary invasion began in this area. A similar pattern is found around Harrisburg (PA), although the diffusive spread has now reached Harrisburg too.
+
+
+
+```{r save file with jumps for all rotations and datasets}
+Jumps_DP8_GS10 <- bind_rows(Results_DP8_GS10_rotate0$Jump %>% add_column(rotation = 0),
+                                 Results_DP8_GS10_rotate1$Jump %>% add_column(rotation = 1),
+                                 Results_DP8_GS10_rotate2$Jump %>% add_column(rotation = 2),
+                                 Results_DP8_GS10_rotate3$Jump %>% add_column(rotation = 3),
+                                 Results_DP8_GS10_rotate4$Jump %>% add_column(rotation = 4),
+                                 Results_DP8_GS10_rotate5$Jump %>% add_column(rotation = 5),
+                                 Results_DP8_GS10_rotate6$Jump %>% add_column(rotation = 6),
+                                 Results_DP8_GS10_rotate7$Jump %>% add_column(rotation = 7),
+                                 Results_DP8_GS10_rotate8$Jump %>% add_column(rotation = 8),
+                                 Results_DP8_GS10_rotate9$Jump %>% add_column(rotation = 9))
+
+Jumps_DP8_GS15 <- bind_rows(Results_DP8_GS15_rotate0$Jump %>% add_column(rotation = 0),
+                                 Results_DP8_GS15_rotate1$Jump %>% add_column(rotation = 1),
+                                 Results_DP8_GS15_rotate2$Jump %>% add_column(rotation = 2),
+                                 Results_DP8_GS15_rotate3$Jump %>% add_column(rotation = 3),
+                                 Results_DP8_GS15_rotate4$Jump %>% add_column(rotation = 4),
+                                 Results_DP8_GS15_rotate5$Jump %>% add_column(rotation = 5),
+                                 Results_DP8_GS15_rotate6$Jump %>% add_column(rotation = 6),
+                                 Results_DP8_GS15_rotate7$Jump %>% add_column(rotation = 7),
+                                 Results_DP8_GS15_rotate8$Jump %>% add_column(rotation = 8),
+                                 Results_DP8_GS15_rotate9$Jump %>% add_column(rotation = 9))
+
+Jumps_DP12_GS10 <- bind_rows(Results_DP12_GS10_rotate0$Jump %>% add_column(rotation = 0),
+                                 Results_DP12_GS10_rotate1$Jump %>% add_column(rotation = 1),
+                                 Results_DP12_GS10_rotate2$Jump %>% add_column(rotation = 2),
+                                 Results_DP12_GS10_rotate3$Jump %>% add_column(rotation = 3),
+                                 Results_DP12_GS10_rotate4$Jump %>% add_column(rotation = 4),
+                                 Results_DP12_GS10_rotate5$Jump %>% add_column(rotation = 5),
+                                 Results_DP12_GS10_rotate6$Jump %>% add_column(rotation = 6),
+                                 Results_DP12_GS10_rotate7$Jump %>% add_column(rotation = 7),
+                                 Results_DP12_GS10_rotate8$Jump %>% add_column(rotation = 8),
+                                 Results_DP12_GS10_rotate9$Jump %>% add_column(rotation = 9))
+
+Jumps_DP12_GS15 <- bind_rows(Results_DP12_GS15_rotate0$Jump %>% add_column(rotation = 0),
+                                 Results_DP12_GS15_rotate1$Jump %>% add_column(rotation = 1),
+                                 Results_DP12_GS15_rotate2$Jump %>% add_column(rotation = 2),
+                                 Results_DP12_GS15_rotate3$Jump %>% add_column(rotation = 3),
+                                 Results_DP12_GS15_rotate4$Jump %>% add_column(rotation = 4),
+                                 Results_DP12_GS15_rotate5$Jump %>% add_column(rotation = 5),
+                                 Results_DP12_GS15_rotate6$Jump %>% add_column(rotation = 6),
+                                 Results_DP12_GS15_rotate7$Jump %>% add_column(rotation = 7),
+                                 Results_DP12_GS15_rotate8$Jump %>% add_column(rotation = 8),
+                                 Results_DP12_GS15_rotate9$Jump %>% add_column(rotation = 9))
+
+Jumps_DP16_GS10 <- bind_rows(Results_DP16_GS10_rotate0$Jump %>% add_column(rotation = 0),
+                                 Results_DP16_GS10_rotate1$Jump %>% add_column(rotation = 1),
+                                 Results_DP16_GS10_rotate2$Jump %>% add_column(rotation = 2),
+                                 Results_DP16_GS10_rotate3$Jump %>% add_column(rotation = 3),
+                                 Results_DP16_GS10_rotate4$Jump %>% add_column(rotation = 4),
+                                 Results_DP16_GS10_rotate5$Jump %>% add_column(rotation = 5),
+                                 Results_DP16_GS10_rotate6$Jump %>% add_column(rotation = 6),
+                                 Results_DP16_GS10_rotate7$Jump %>% add_column(rotation = 7),
+                                 Results_DP16_GS10_rotate8$Jump %>% add_column(rotation = 8),
+                                 Results_DP16_GS10_rotate9$Jump %>% add_column(rotation = 9))
+
+Jumps_DP16_GS15 <- bind_rows(Results_DP16_GS15_rotate0$Jump %>% add_column(rotation = 0),
+                                 Results_DP16_GS15_rotate1$Jump %>% add_column(rotation = 1),
+                                 Results_DP16_GS15_rotate2$Jump %>% add_column(rotation = 2),
+                                 Results_DP16_GS15_rotate3$Jump %>% add_column(rotation = 3),
+                                 Results_DP16_GS15_rotate4$Jump %>% add_column(rotation = 4),
+                                 Results_DP16_GS15_rotate5$Jump %>% add_column(rotation = 5),
+                                 Results_DP16_GS15_rotate6$Jump %>% add_column(rotation = 6),
+                                 Results_DP16_GS15_rotate7$Jump %>% add_column(rotation = 7),
+                                 Results_DP16_GS15_rotate8$Jump %>% add_column(rotation = 8),
+                                 Results_DP16_GS15_rotate9$Jump %>% add_column(rotation = 9))
+
+
+Jumps <- bind_rows(Jumps_DP8_GS10 %>% add_column(params = "DP8GS10"),
+                        Jumps_DP8_GS15 %>% add_column(params = "DP8GS15"),
+                        Jumps_DP12_GS10 %>% add_column(params = "DP12GS10"),
+                        Jumps_DP12_GS15 %>% add_column(params = "DP12GS15"),
+                        Jumps_DP16_GS10 %>% add_column(params = "DP16GS10"),
+                        Jumps_DP16_GS15 %>% add_column(params = "DP16GS15"))
+
+Jumps$params <- factor(Jumps$params, levels = c("DP8GS10", "DP12GS10", "DP16GS10",
+                                                              "DP8GS15", "DP12GS15", "DP16GS15"))
+
+write.csv(Jumps, "../exported-data/jumps_3DP_10rotations.csv", row.names = F)
+```
+
+
+```{r map of jumps per params per year, fig.cap = "Map of SLF jumps", fig.height=6, fig.width=10}
+
+map_jumps2016 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2015)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data_DP16_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2016)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP16_rotate0 %>%  filter(bio_year == 2016),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2016), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>%  filter(bio_year == 2016), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2016.jpg", map_jumps2016 , width = 15, height = 10)
+
+
+map_jumps2017 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2016)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data_DP16_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2017)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP16_rotate0 %>%  filter(bio_year == 2017),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2017), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>%  filter(bio_year == 2017), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2017.jpg", map_jumps2017 , width = 15, height = 10)
+
+
+map_jumps2018 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2017)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data_DP16_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2018)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP16_rotate0 %>%  filter(bio_year == 2018),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+   geom_point(data = Thresholds %>%  filter(bio_year == 2018), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>%  filter(bio_year == 2018), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2018.jpg", map_jumps2018 , width = 15, height = 10)
+
+
+
+map_jumps2019 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2018)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data_DP16_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2019)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP16_rotate0 %>%  filter(bio_year == 2019),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+  geom_point(data = Thresholds %>%  filter(bio_year == 2019), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>%  filter(bio_year == 2019), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2019.jpg", map_jumps2019 , width = 15, height = 10)
+
+
+map_jumps2020 <- ggplot(data = states) +
+  geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2019)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "yellow", shape = 19, size = 2) +
+  geom_point(data = grid_data_DP16_rotate0 %>% filter(Status == "Established", bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = grid_data_DP16_rotate0 %>%  filter(bio_year == 2020),
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+  geom_point(data = Thresholds %>%  filter(bio_year == 2020), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 21, size = 2) +
+  geom_point(data = Jumps %>%  filter(bio_year == 2020), 
+             aes(x = longitude_rounded, y = latitude_rounded), fill = "blue", shape = 21, size = 2) +
+  # scale_color_manual(values = rainbow(16)) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_jumps_2020.jpg", map_jumps2020 , width = 15, height = 10)
+
+```
+
+
+Search for a consensus of jumps
+
+```{r search consensus per params}
+
+jumps_count_GS15 <- Jumps %>% filter(params %in% c("DP8GS15", "DP12GS15")) %>% 
+  count(latitude_rounded, longitude_rounded, params)
+
+hist <- ggplot(data = jumps_count_GS15) +
+  geom_bar(aes(x = n)) +
+  facet_wrap(~params, ncol = 1)
+
+ggsave("../figures/vignette_quadrants/histogram_jumps_GS15.jpg", hist, width = 4, height = 6)
+
+
+centroid <- c(-75.675340, 40.415240)
+map_jumpers_merged <- ggplot(data = states) +
+  geom_sf(data = states, fill = "white") + 
+  coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+  geom_point(data = grid_data_DP8_rotate0 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "grey", shape = 19, size = 1) +
+  geom_point(data = grid_data_DP8_rotate0,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+  geom_point(data = jumps_count_GS15,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(n)), shape = 19, size = 2) +
+  scale_colour_manual(values = c(rep("yellow", 4), rep("red", 2), rep("black", 4))) +
+  facet_wrap(~params, ncol = 3) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  theme(legend.position="top")
+
+map_jumpers_merged
+
+ggsave("../figures/vignette_quadrants/map_jumpers_merged.jpg", map_jumpers_merged, width = 10, height = 6)
+
+
+map_jumpers_merged_sup7 <- ggplot(data = states) +
+  geom_sf(data = states, fill = "white") + 
+  coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+  geom_point(data = grid_data_DP8_rotate0 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "grey", shape = 19, size = 1) +
+  geom_point(data = grid_data_DP8_rotate0,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+  geom_point(data = jumps_count_GS15 %>% filter(n > 5),
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(n)), shape = 19, size = 2) +
+  scale_colour_manual(values = c(rep("red", 2), rep("black", 3))) +
+  facet_wrap(~params, ncol = 2) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  theme(legend.position="top")
+
+map_jumpers_merged_sup7
+
+ggsave("../figures/vignette_quadrants/map_jumpers_merged_sup7.jpg", map_jumpers_merged_sup7, width = 10, height = 6)
+
+
+jumpers_DP12GS15_sup7 <- jumps_count_GS15 %>% filter(params == "DP12GS15" & n > 7)
+jumpers_DP8GS15_sup5 <- jumps_count_GS15 %>% filter(params == "DP8GS15" & n > 5)
+comparison <- bind_rows(jumpers_DP12GS15_sup7, jumpers_DP8GS15_sup5)
+test <- comparison %>% count(latitude_rounded, longitude_rounded)
+levels(as.factor(test$n))
+
+```
+
+```{r get the final jump catalog}
+
+Selection <- Jumps_DP12_GS15 %>% count(latitude_rounded, longitude_rounded) %>% filter (n > 7)
+
+Jumps_selected <- Jumps_DP12_GS15 %>% filter(latitude_rounded %in% Selection$latitude_rounded & 
+                   longitude_rounded %in% Selection$longitude_rounded) %>% 
+  distinct_at(c("latitude_rounded", "longitude_rounded"), .keep_all = T)
+
+write.csv(Jumps_selected, "../exported-data/Jumps_selected.csv", row.names = F)
+```
+
+```{r compare results between params for all jumps}
+levels(Jumps$params)
+# Compare the variation in the number of disk portions (gap size = 15)
+jumps_count_GS15 <- Jumps %>% filter(params %in% c("DP8GS15", "DP12GS15")) %>% 
+  count(latitude_rounded, longitude_rounded, params) %>% filter(n > 5) %>% 
+  count(latitude_rounded, longitude_rounded)
+
+map_jumpers_merged_GS15 <- ggplot(data = states) +
+  geom_sf(data = states, fill = "white") + 
+  coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+  geom_point(data = grid_data_DP8_rotate0 %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "grey", shape = 19, size = 1) +
+  geom_point(data = Jumps,
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+  geom_point(data = jumps_count_GS15,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(n)), shape = 19, size = 2) +
+  scale_colour_manual(values = c(rep("red", 1), rep("black", 1))) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  theme(legend.position="top")
+
+map_jumpers_merged_GS15
+
+ggsave("../figures/vignette_quadrants/map_jumpers_merged_diskportions.jpg", map_jumpers_merged_GS15, width = 6, height = 6)
+```
+
+
+
+
+
+
+
+```{r add a column for location}
+
+Jumps_selected <- Jumps_selected %>% add_column(Location = "Other") 
+Jumps_selected[Jumps_selected$latitude_rounded < 39.5 & Jumps_selected$bio_year == 2018,13] <- "Winchester"
+Jumps_selected[Jumps_selected$latitude_rounded > 40 & Jumps_selected$latitude_rounded < 40.5 & Jumps_selected$longitude_rounded < -76 & Jumps_selected$bio_year == 2018,13] <- "Harrisburg"
+Jumps_selected$Location <- factor(Jumps_selected$Location, levels = c("Harrisburg", "Winchester", "Other"))
+knitr::kable(table(Jumps_selected$bio_year, Jumps_selected$Location))
+```
+Most jump events occurred in Harrisburg, PA (21 jumps), and Winchester, VA (28 jumps) in 2018. They might be true independent jumps, i.e. SLF hitchhiked multiple times to these locations the same year. Alternatively, they might be the result of SLF quickly spreading from a single jump event. Finally, they can be a mix between these two hypotheses. For the rest of the analyses, we will test the two most contrasted hypotheses in parallel in order to test whether results vary. For the first hypothesis (all points are independent introductions), the dataset consists of all 82 jump points. For the second hypothesis (only one introduction in Harrisburg and Winchester), the dataset consists of 44 jumps, with the jumps in Harrisburg and Winchester summarized each by their most central point.
+
+```{r calculate the centroid for Harrisburg and Winchester}
+
+# Create a dataset with centroids in Winchester and Harrisburg
+Jumpers_centroids <- Jumps_selected %>% group_by(Location) %>% summarise(latitude_rounded = mean(latitude_rounded), longitude_rounded = mean(longitude_rounded))
+
+
+# Harrisburg: 
+# Find the point closest to that centroid. 
+# Create the shapefiles with jumpers
+Jumpers_Harrisburg <- Jumps_selected %>%  filter(Location == "Harrisburg") %>%  add_column(DistToCentroid = NA)
+Jumpers_Harrisburg_layer <- st_as_sf(x = Jumpers_Harrisburg, 
+                                     coords = c("longitude_rounded", "latitude_rounded"), 
+                                     crs = 4326, remove = F)
+Jumpers_Harrisburg_layer_proj <- st_transform(Jumpers_Harrisburg_layer)
+Centroid_Harrisburg <- st_as_sf(x = Jumpers_centroids[1,], 
+                                coords = c("longitude_rounded", "latitude_rounded"), 
+                                crs = 4326, remove = F)
+Centroid_Harrisburg_proj <- st_transform(Centroid_Harrisburg)
+
+# Calculate their distance to the centroid
+for (j in 1:length(Jumpers_Harrisburg_layer_proj$DistToCentroid)){ 
+  Jumpers_Harrisburg_layer_proj$DistToCentroid[j] <- st_distance(x = Jumpers_Harrisburg_layer_proj[j,], y = Centroid_Harrisburg_proj)
+}
+
+# Keep the closest point
+Harrisburg <- Jumpers_Harrisburg_layer_proj %>% slice(which.min(DistToCentroid))
+
+Harrisburg_map <- ggplot(data = states) +
+  geom_sf(data = states, fill = "white") + 
+  coord_sf(xlim = c(-77, -76.6), ylim = c(40.2, 40.4), expand = FALSE) +
+  geom_point(data = Jumpers_Harrisburg_layer_proj,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(bio_year)), shape = 19, size = 3) +
+  geom_point(data = Centroid_Harrisburg_proj, aes(x = longitude_rounded, y = latitude_rounded)) +
+  geom_point(data = Harrisburg, aes(x = longitude_rounded, y = latitude_rounded), col = "blue") + 
+  labs(x = "Longitude", y = "Latitude")+
+  theme(legend.position="top")
+
+
+
+
+
+
+# Winchester:
+# Find the point closest to that centroid
+# Create the shapefiles with jumpers
+Jumpers_Winchester <- Jumps_selected %>%  filter(Location == "Winchester") %>%  add_column(DistToCentroid = NA)
+Jumpers_Winchester_layer <- st_as_sf(x = Jumpers_Winchester, 
+                                     coords = c("longitude_rounded", "latitude_rounded"), 
+                                     crs = 4326, remove = F)
+Jumpers_Winchester_layer_proj <- st_transform(Jumpers_Winchester_layer)
+Centroid_Winchester <- st_as_sf(x = Jumpers_centroids[2,], 
+                                coords = c("longitude_rounded", "latitude_rounded"), 
+                                crs = 4326, remove = F)
+Centroid_Winchester_proj <- st_transform(Centroid_Winchester)
+
+# Calculate their distance to the centroid
+for (j in 1:length(Jumpers_Winchester_layer_proj$DistToCentroid)){ 
+  Jumpers_Winchester_layer_proj$DistToCentroid[j] <- st_distance(x = Jumpers_Winchester_layer_proj[j,], y = Centroid_Winchester_proj)
+}
+
+# Keep the closest point
+Winchester <- Jumpers_Winchester_layer_proj %>% slice(which.min(DistToCentroid))
+
+
+Winchester_map <- ggplot(data = states) +
+  geom_sf(data = states, fill = "white") + 
+  coord_sf(xlim = c(-78.3, -78), ylim = c(39, 39.4), expand = FALSE) +
+  geom_point(data = Jumpers_Winchester_layer_proj,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(bio_year)), shape = 19, size = 3) +
+  geom_point(data = Centroid_Winchester_proj, aes(x = longitude_rounded, y = latitude_rounded)) +
+  geom_point(data = Winchester,  aes(x = longitude_rounded, y = latitude_rounded), col = "blue") + 
+  labs(x = "Longitude", y = "Latitude")+
+  theme(legend.position="top")
+
+
+# Assemble datasets
+Jumpers_reduced <- Jumps_selected %>% filter(Location == "Other")
+Jumper_Winchester <- Jumps_selected %>% filter(latitude_rounded %in% Winchester$latitude_rounded & 
+                                               longitude_rounded %in% Winchester$longitude_rounded)
+Jumper_Harrisburg <- Jumps_selected %>% filter(latitude_rounded %in% Harrisburg$latitude_rounded &
+                                                 longitude_rounded %in% Harrisburg$longitude_rounded)
+Jumpers_all<- rbind(Jumpers_reduced, Jumper_Winchester)
+Jumpers_all<- rbind(Jumpers_all, Jumper_Harrisburg)
+
+write.csv(Jumpers_all, "../exported-data/Jumps_selected_reduced.csv", row.names = F)
+```
+
+Figure 5 is the map of the 44 jump events under the hypothesis of non-independent jumps to Harrisburg and Winchester (replaced by their most central point).
+
+```{r map of jumpers without Harrisburg and Winchester, fig.cap = "Map of SLF jumps without simultaneous jumps", fig.height=8, fig.width=8}
+
+map_jumpers_reduced <- ggplot(data = states) +
+  geom_sf(data = states, fill = "white") +
+  coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+  geom_point(data = grid_data %>% filter(Status == "Established" & bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), col = "grey", shape = 19, size = 2) +
+  geom_point(data = grid_data, 
+             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
+  geom_point(data = Jumpers_all,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(bio_year)), shape = 19, size = 2) +
+  scale_colour_manual(values = c("yellow", "orange", "red", "black")) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  labs(x = "Longitude", y = "Latitude")+
+  theme(legend.position="top")
+
+map_jumpers_reduced
+```
+
+
+
+## Evolution of the radius of diffusive spread and jumps over time
+
+We can now look at how the radius of the invasion increases over time, when differentiating diffusive spread and jump dispersal (Figure 6). In the westernmost disk portions, jump dispersal is responsible for the very high increase in the invasion radius. In the other disk portions, the spread seems to be mostly linked to diffusive dispersal. 
+
+```{r figure total spread/diffusive spread for slf established, fig.cap = "Evolution of the radius of the invasion over time, when diffusive spread and jump dispersal are separated", echo=FALSE, message = FALSE}
+
+#Data on total spread
+spread_distances_tab <- grid_data_rotate0 %>% filter(Status == "Established" & bio_year != 2021) %>%
+  group_by(Status, bio_year, portion) %>% 
+  summarise(MaxDist = max(DistToIntro))
+
+
+spread <- ggplot(data = spread_distances_tab, aes(x = bio_year, y = MaxDist)) +
+  facet_wrap(~portion, ncol = 4) +
+    geom_bar(stat="identity", fill = "white", col = "black") +
+  geom_bar(data = Results_rotate4$Dist, aes(x = bio_year , y = DistToIntro), fill = "grey", col = "black", stat = "identity") +
+  ylab("Invasion radius (km)")+
+  xlab("Year") +
+  theme_classic()
+
+spread
+```
+
+```{r save evolution of spread radius, eval = params$savefiles}
+ggsave("../figures/vignette_quadrants/evolution_spread_radius85_15.jpg", spread, width = 8, height = 6)
+```
+
+\newpage
+
+# 5. Conclusion
+
+The spread of the spotted lanternfly in the US is likely due both to diffusive spread and human-assisted jump dispersal. 75 jump occurrences have been identified, and most of them are situated in Winchester (north VA) and western Pennsylvania (especially Harrisburg). 
+
+Jump events are likely be caused by SLF hitchhiking on human transports, and establishing near transport infrastructures: railroads, roads, and airports. In the next vignette, we will test the significance of the proximity between jump events and transport infrastructures by a comparison with a random distribution. We will also compare these distances to those of diffusers (SLF spread through diffusive spread) and of points where SLF were not detected, to check for a potential bias in survey locations.

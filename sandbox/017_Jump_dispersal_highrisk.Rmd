@@ -1,0 +1,767 @@
+---
+title: "Making the most of invasion records, the case of the spotted lanternfly, part III: Extending knowledge to northeastern US"
+author: 
+- Nadege Belouard^[Temple University, nadege.belouard@temple.edu]
+- Sebastiona De Bona^[Temple University, seba.debona@temple.edu]
+- Jocelyn E. Behm^[Temple University, jebehm@temple.edu]
+- Matthew R. Helmus^[Temple University, mrhelmus@temple.edu]
+date: "5/3/2021"
+output:
+  pdf_document:
+    toc: TRUE
+    toc_depth: 2
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+params:
+  show_code: FALSE
+  export_figures: TRUE
+---
+
+```{r setup for rendering, include = F}
+# here we set the images to png, to reduce the size of the output
+# we set some global paramters in the yaml to allow us to switch the chunks
+# of code on and off when displaying
+knitr::opts_chunk$set(dpi = 300, echo = params$show_code)
+```
+
+\newpage
+
+# Aim and setup
+ 
+For this third vignette, we want to investigate the relationship between properties generating or receiving high levels of traffic and the actual presence of established populations of SLF. A list of areas considered at high risk of colonization by SLF in PA has been built by the iEcolab.  
+
+(1) High-risk areas as jump locations? We will calculate the distance of jumpers, diffusers and non-detections to high-risk areas, and test whether these distances are shorter than random using the same methods as in the previous vignette.
+
+(2) Are high-risk locations at risk relative to transport infrastructures? We will calculate how far these high-risk areas are from transport infrastructures. We will determine whether all categories of high-risk areas are comparable regarding their proximity to transport infrastructure.  
+
+(3) Finally, we will use the knowledge we have on the location of SLF jumpers relative to transports, to project potential areas of colonization over six states (PA, WV, VA, MD, DE, NJ). We will assess the proportion of high-risk locations that are situated in this zone, and whether there are variations between categories of high-risk locations.
+
+
+
+```{r load landscape features, warning = F, message = F}
+
+library(tidyverse)
+library(sf)
+library(spData)
+library(dplyr)
+library(reshape2)
+
+# SLF data (in the folder SLF_datascience)
+grid_DP16GS15 <- read_csv("../exported-data/Distances_observed/grid_cat_DP16GS15.csv")
+grid_layer <- st_as_sf(x = grid_DP16GS15, coords = c("longitude_rounded", "latitude_rounded"), crs = 4326, remove = F)
+grid_proj <- st_transform(grid_layer, crs = 4326)
+
+#Keep a landscape layer for crs
+# Landscape features
+airports <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Airports/Airports_merged_projected.shp", quiet = T)
+rail <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Railroads/Railways_merged_projected.shp", quiet = T)
+road <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Roads/Prisec_roads/Prisec_roads_merged_projected.shp", quiet = T)
+
+```
+
+
+# 1. High risk areas as spots of colonization
+
+We first want to check whether SLF are preferentially established near high-risk locations, and whether there is a difference between jumpers, diffusers and non-detections. Because we have listed high-risk areas in PA only, we subset the jumpers, diffusers and non-detections datasets to points situated in PA only.
+
+```{r prepare dataset of high-risk areas for PA}
+# Create a list with all files names
+files <- list.files(path = "../GIS/high-risk-areas-PA", 
+           pattern = NULL, all.files = FALSE,
+           full.names = T, recursive = FALSE,
+           ignore.case = FALSE, include.dirs = FALSE, no.. = FALSE)
+
+# Add all the high risk locations in a single table
+Highrisk <-  read.csv(files[1], sep=";")
+file_name = sub("\\.[a-z]+$", "", files[1])
+Highrisk$category = gsub("../GIS/high-risk-areas-PA/jocelynb_pa_locations_webmap_table_", "", file_name) 
+
+for (f in files[-1]) {
+file <- read.csv(f, sep=";")
+file_name = sub("\\.[a-z]+$", "", f)
+file$category = gsub("../GIS/high-risk-areas-PA/jocelynb_pa_locations_webmap_table_", "", file_name) 
+Highrisk <- rbind(Highrisk, file)
+} 
+
+# dim(Highrisk)
+
+
+# write.csv2(Highrisk, "../exported-data/highrisk.csv")
+# transient_file <- read.csv2("../exported-data/highrisk.csv")
+# write.csv(transient_file[,-1], "../exported-data/highrisk.csv", row.names= F)
+# transient_file_test <- read.csv("../exported-data/highrisk.csv")
+
+```
+
+
+```{r load file of high risk areas}
+# Landscape features
+Highrisk <- read.csv("../exported-data/highrisk.csv")
+Highrisk_layer <- st_as_sf(x = Highrisk, coords = c("Longitude", "Latitude"), crs = 4326)
+Highrisk_proj <- st_transform(Highrisk_layer, crs = 4326)
+```
+
+
+
+
+# Other points considered at risk (points, buffer radius = 50 m)
+Highrisk_loc <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_datascience/GIS/HighRisk_buffer50m_projected.shp", quiet = T)
+unique(Highrisk_loc$category)
+
+# Level of interest: high
+# Fedex, amazon, ups
+mail <- Highrisk_loc %>% filter(category %in% c("fedex", "ups", "amazonFullfilment"))
+
+# Landscaping companies, lumber yards
+wood <- Highrisk_loc %>% filter(category %in% c("landscape", "lumberYards", "sawmill"))
+
+# Wineries
+wineries <- Highrisk_loc %>% filter(category %in% c("winery"))
+
+# Level of interest: medium
+# People hobbies: campgrounds, summercamps, casino, stadiums, fairgrounds, amusement parks, flea markets, auction centers
+people <- Highrisk_loc %>% filter(category %in% c("amusementParks", "auctionCenter", "campground", "casino", "fairgrounds", "fleamarket", "racetracks", "stadiums", "summerCamp"))
+
+# Level of interest: low
+garages <- Highrisk_loc %>% filter(category %in% c("truckGarage", "autoRepair"))
+
+boats <- Highrisk_loc %>% filter(category %in% c("boatLaunches", "marinas"))
+
+moving_companies <- Highrisk_loc %>% filter(category %in% c("movingCompanies"))
+
+bottling_plants <- Highrisk_loc %>% filter(category %in% c("bottlingPlants"))
+  
+colleges <- Highrisk_loc %>% filter(category %in% c("college"))
+  
+farmer_market <- Highrisk_loc %>% filter(category %in% c("farmerMarket"))
+  
+truck_stops <- Highrisk_loc %>% filter(category %in% c("truckStops"))
+  
+distribution_centers <- Highrisk_loc %>% filter(category %in% c("distributionCenter")) 
+
+# Train station (intermodal) PARTIAL DATA?
+intermodal <-  Highrisk_loc %>% filter(category %in% c("intermodal"))
+
+# Level of interest: null
+#  [1]  "armories" 
+
+
+
+## Calculate distances to points of interest
+
+```{r distance of SLF to points of high and medium interest, eval = FALSE}
+
+pennsylvania <- states %>% filter(ID == "pennsylvania")
+pennsylvania <- st_make_valid(pennsylvania)
+
+jumpers_proj <- st_as_sf(x = jumpers, coords = c("longitude_rounded", "latitude_rounded"), crs = 4326)
+jumpersPA <- st_intersection(jumpers_proj, pennsylvania)
+
+# Take one full dataset for grid data
+grid_data <- grid_data_full %>% 
+  select(-sectors) %>% 
+  filter(bio_year != 2021) %>% 
+  distinct(bio_year, latitude_rounded, longitude_rounded, .keep_all = T)
+
+# For quick analysis:
+grid_data <- jumpersPA
+
+# Create rows for distances
+grid_data %<>% add_column(DistToMail = NA,
+                          DistToWood = NA,
+                          DistToWine = NA,
+                          DistToPeople = NA)
+
+# Create a shapefile 
+grid_layer <- st_as_sf(x = grid_data, coords = c("longitude_rounded", "latitude_rounded"), crs = 4326, remove = F)
+grid_proj <- st_transform(grid_layer, crs = st_crs(rail))
+
+#Calculate their distance to transport infrastructures
+for (j in 1:length(grid_proj$DistToMail)){ 
+  # Print the row being considered
+  print(j)
+  
+  # Calculate distance to the closest mail-related point
+  dist_mail <- st_distance(x = grid_proj[j,], y = mail)
+  grid_proj$DistToMail[j] <- min(dist_mail)
+  
+  # Calculate distance to the closest wood-related point
+  dist_wood <- st_distance(x = grid_proj[j,], y = wood)
+  grid_proj$DistToWood[j] <- min(dist_wood)
+  
+  # Calculate distance to the closest winery
+  dist_wine <- st_distance(x = grid_proj[j,], y = wineries)
+  grid_proj$DistToWine[j] <- min(dist_wine)
+  
+  # Calculate distance to the closest regional airport
+  dist_people <- st_distance(x = grid_proj[j,], y = people)
+  grid_proj$DistToPeople[j] <- min(dist_people)
+
+}
+
+
+# Save file
+st_geometry(grid_proj) <- NULL
+dist_poi <- grid_proj
+write.csv(grid_proj, "../exported-data/Distances_observed/grid_distances_poi.csv", row.names = F)
+```
+
+## Calculate distances to points of lower interest
+```{r distance of SLF to points of high and medium interest, eval = FALSE}
+
+# Take one full dataset for grid data
+grid_data <- grid_data_full %>% 
+  select(-sectors) %>% 
+  filter(bio_year != 2021) %>% 
+  distinct(bio_year, latitude_rounded, longitude_rounded, .keep_all = T)
+
+# For quick analysis:
+grid_data <- jumpers_wide
+
+# Create rows for distances
+grid_data %<>% add_column(DistToGarages = NA,
+                          DistToBoats = NA,
+                          DistToMovingCompanies = NA,
+                          DistToBottlingPlants = NA,
+                          DistToColleges = NA,
+                          DistToFarmerMarkets = NA,
+                          DistToTruckStops = NA,
+                          DistToDistribCenters = NA,
+                          DistToIntermodal = NA)
+
+# Create a shapefile 
+grid_layer <- st_as_sf(x = grid_data, coords = c("longitude_rounded", "latitude_rounded"), crs = 4326, remove = F)
+grid_proj <- st_transform(grid_layer, crs = st_crs(rail))
+
+#Calculate their distance to transport infrastructures
+for (j in 1:length(grid_proj$DistToGarages)){ 
+  # Print the row being considered
+  print(j)
+  
+  # Calculate distance to the closest garage
+  dist_garage <- st_distance(x = grid_proj[j,], y = garages)
+  grid_proj$DistToGarages[j] <- min(dist_garage)
+  
+  # Calculate distance to the closest private boat launch
+  dist_boats <- st_distance(x = grid_proj[j,], y = boats)
+  grid_proj$DistToBoats[j] <- min(dist_boats)
+  
+  # Calculate distance to the closest moving company
+  dist_movingcompanies <- st_distance(x = grid_proj[j,], y = moving_companies)
+  grid_proj$DistToMovingCompanies[j] <- min(dist_movingcompanies)
+  
+  # Calculate distance to the closest bottling plant
+  dist_bottling <- st_distance(x = grid_proj[j,], y = bottling_plants)
+  grid_proj$DistToBottlingPlants[j] <- min(dist_bottling)
+  
+  # Calculate distance to the closest college
+  dist_colleges <- st_distance(x = grid_proj[j,], y = colleges)
+  grid_proj$DistToColleges[j] <- min(dist_colleges)
+
+  # Calculate distance to the closest farmers market
+  dist_farmersmarkets <- st_distance(x = grid_proj[j,], y = farmer_market)
+  grid_proj$DistToFarmerMarkets[j] <- min(dist_farmersmarkets)
+
+  # Calculate distance to the closest truck stop
+  dist_truckstop <- st_distance(x = grid_proj[j,], y = truck_stops)
+  grid_proj$DistToTruckStop[j] <- min(dist_truckstop)
+  
+  # Calculate distance to the closest distrib center
+  dist_distribcenter <- st_distance(x = grid_proj[j,], y = distribution_centers)
+  grid_proj$DistToDistribCenters[j] <- min(dist_distribcenter)
+  
+  # Calculate distance to the closest intermodal
+  dist_intermodal <- st_distance(x = grid_proj[j,], y = intermodal)
+  grid_proj$DistToIntermodal[j] <- min(dist_intermodal)
+
+}
+
+
+# Save file
+st_geometry(grid_proj) <- NULL
+dist_poi_low <- grid_proj
+write.csv(grid_proj, "../exported-data/Distances_observed/grid_distances_poi_low.csv", row.names = F)
+```
+
+## A. Calculate the observed distances of SLF to high-risk areas
+
+
+```{r calculate distances to high risk areas}
+
+# Restrict the list of jumpers to PA, because we only have high risk areas for PA
+states <- sf::st_as_sf(maps::map("state", plot = F, fill = T))
+pennsylvania <- states %>% filter(ID == "pennsylvania")
+pennsylvania <- st_make_valid(pennsylvania)
+grid_PA <- st_intersection(grid_proj, pennsylvania)
+
+ggplot(data = grid_PA) +
+    geom_sf(data = pennsylvania, fill = "white") + 
+  geom_point(data = grid_proj,
+            aes(x = longitude_rounded, y = latitude_rounded),
+            shape = 19, size = 1, col = "black") +
+  geom_point(data = grid_PA,
+            aes(x = longitude_rounded, y = latitude_rounded),
+            shape = 19, size = 1, col = "blue") +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+
+grid_PA %<>% mutate(DistToHighRisk = NA)
+grid_PA$Category <- factor(grid_PA$Category, levels = c("Jumpers", "Diffusers", "Present", "Negatives"))
+
+#Calculate their distance to transport infrastructures   
+for (j in 1:length(grid_PA$DistToHighRisk)){ 
+  dist_highrisk <- st_distance(x = grid_PA[j,], y = Highrisk_proj)
+  grid_PA$DistToHighRisk[j] <- min(dist_highrisk)
+}
+
+```
+
+```{r average values for jumpersPA}
+
+jumpers_PA <- grid_PA %>% filter(Category == "Jumpers")
+
+#Keep the average in a table
+# Data_disttoairportPA = mean(jumpers_PA$DistToAirport) #6615
+# Data_disttorailPA = mean(jumpers_PA$DistToRail) #660
+# Data_disttoroadPA = mean(jumpers_PA$DistToRoad) #510
+Data_disttohighriskPA = mean(jumpers_PA$DistToHighRisk) #601
+``` 
+
+The 45 jumpers are situated on average at `r round(Data_disttohighriskPA,0)` m of a high-risk location.  
+Variable summary (min, 1st quartile, median, mean, 3rd quartile, max):   
+`r round(summary(jumpersPA_proj$DistToHighRisk),0)`  
+
+
+```{r average values for diffusersPA}
+diffusers_PA <- grid_PA %>% filter(Category == "Diffusers")
+
+#Keep the average in a table
+# Diffusers_disttoairportPA = mean(diffusers_PA$DistToAirport) #6279
+# Diffusers_disttorailPA = mean(diffusers_PA$DistToRail) #3134
+# Diffusers_disttoroadPA = mean(diffusers_PA$DistToRoad) #1181
+Diffusers_disttohighriskPA = mean(diffusers_PA$DistToHighRisk) #2572
+``` 
+
+The 4,941 diffusers in PA are situated on average at `r round(Diffusers_disttohighriskPA,0)` m of a high-risk location.  
+Variable summary (min, 1st quartile, median, mean, 3rd quartile, max):  
+`r round(summary(diffusersPA_proj$DistToHighRisk),0)`  
+
+
+```{r average values for undetectedPA}
+negatives_PA <- grid_PA %>% filter(Category == "Negatives")
+
+#Keep the average in a table
+# undetected_disttoairportPA = mean(negatives_PA$DistToAirport) #7106
+# undetected_disttorailPA = mean(negatives_PA$DistToRail) #5077
+# undetected_disttoroadPA = mean(negatives_PA$DistToRoad) #1046
+undetected_disttohighriskPA = mean(negatives_PA$DistToHighRisk) #2300
+``` 
+
+The 21,894 non-detections in PA are situated on average at `r round(undetected_disttohighriskPA,0)` m of a high-risk location.  
+Variable summary (min, 1st quartile, median, mean, 3rd quartile, max):   
+`r round(summary(undetectedPA_proj$DistToHighRisk),0)`  
+
+
+```{r Distance of all sites to transport infrastructures}
+#Keep the average in a table
+# total_disttoairportPA = mean(totalPA$DistToAirport) # 6953
+# total_disttorailPA = mean(totalPA$DistToRail) # 4712 
+# total_disttoroadPA = mean(totalPA$DistToRoad) # 1070
+total_disttohighriskPA = mean(grid_PA$DistToHighRisk) # 2347
+
+```
+
+The 26,880 survey points in PA are situated on average at `r round(total_disttohighriskPA,0)` m of a high-risk location.  
+Variable summary (min, 1st quartile, median, mean, 3rd quartile, max):  
+`r round(summary(totalPA$DistToHighRisk),0)` 
+
+
+
+
+## B. Check for differences in observed distances to high-risk areas between categories
+
+### Visual inspection
+
+```{r plot histogram of distances to high risk per category of SLF, fig.height=3, fig.width = 6, fig.cap="Distance of jumpers, diffusers and non-detections to high-risk areas. The y axis is truncated to better show the boxes. Refer to section 1A for variables summary."}
+
+# Plot distances 
+disttohighrisk <- ggplot(grid_PA, aes(y = DistToHighRisk, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 10000)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest high-risk area (m)")
+
+disttohighrisk
+
+ggsave("../figures/vignette_highrisk/disttohighrisk.jpg", disttohighrisk, width = 6, height = 3)
+```
+
+In Figure 1, we find the same pattern as with transport infrastructures: jumpers are located closer to high-risk areas than diffusers and undetected.
+
+
+### Statistical test of the difference between jumpers, diffusers, non-detections.
+
+*As in the previous vignette, These variables are not normally distributed and the variance is not equal between groups. Is there any statistical test that would be appropriate in this case?*
+
+```{r statistical test, eval = FALSE}
+library(RVAideMemoire)
+
+# Dist to high risk locations
+# Test normality
+shapiro.test(jumpers_PA$DistToHighRisk) # W = 0.47938, p-value = 1.462e-14
+shapiro.test(diffusers_PA$DistToHighRisk) # W = 0.89466, p-value < 2.2e-16
+# Test heteroscedasticity
+perm.var.test(jumpers_PA$DistToHighRisk,diffusers_PA$DistToHighRisk) # F = 0.013881, p-value = 0.002
+
+#Test difference
+wilcox.test(jumpers_PA$DistToHighRisk, diffusers_PA$DistToHighRisk, paired = FALSE) 
+#W = 117740, p-value = 2.583e-05
+
+
+# Test normality
+shapiro.test(sample(negatives_PA$DistToHighRisk, 5000)) # W = 0.79392, p-value < 2.2e-16
+# Test heteroscedasticity
+perm.var.test(diffusers_PA$DistToHighRisk,negatives_PA$DistToHighRisk) # F = 0.013881, p-value = 0.002
+
+#Test difference
+wilcox.test(diffusers_PA$DistToHighRisk, negatives_PA$DistToHighRisk, paired = FALSE) 
+# W = 41910059, p-value < 2.2e-16
+
+
+```
+
+
+
+## C. Generate a random dispersal distribution of distances of jumpers to high-risk areas
+
+We now compare whether SLF are situated significantly closer than random to these high-risk areas. As in the previous vignette, We generate a null distribution of jumpers (n = 45), simulated 9,999 times, across PA. 
+
+## H1: Random distribution of jumpers, n = 45 points
+
+```{r dataset with points only for PA, echo=FALSE, warning =FALSE, message = FALSE}
+
+# Generate random samples in the polygon
+# test <- st_sample(pennsylvania, size = 45, type = "random")
+
+# Generate a full grid of points over the polygon
+full_grid <- pennsylvania %>% 
+  st_make_grid(cellsize = c(1/79, 1/111), what = "centers") %>% # grid of points
+  st_intersection(pennsylvania)
+
+grid_random_PA <- st_as_sf(x = full_grid, crs = 4326)
+coordinates_PA = data.frame(st_coordinates(grid_random_PA))
+grid_random_PA$longitude_rounded <- coordinates_PA$X
+grid_random_PA$latitude_rounded <- coordinates_PA$Y
+```
+
+
+```{r generate a random distribution of points for jumpersPA, eval = FALSE}
+
+for (i in 1902:10000){
+  #Generate a set of coordinates
+  print(i)
+  
+  Random_coordinates <- grid_random_PA[sample(nrow(grid_random_PA), size = dim(jumpers_PA)[1], replace = F),]
+  
+  # Calculate distances for each point
+  random <- Random_coordinates %>% add_column(DistToHighRisk = NA,
+                                              Simulation = NA)
+  random_layer <- st_as_sf(x = random, coords = c("Longitude", "Latitude"), crs = 4326)
+  random_proj <- st_transform(random_layer, crs = 4326)
+  
+  
+  for (j in 1:length(random_proj$DistToHighRisk)){ #Calculate their distance to transport infrastructures
+    
+    dist_highrisk <- st_distance(x = random_proj[j,], y = Highrisk_proj)
+    random_proj$DistToHighRisk[j] <- min(dist_highrisk)
+    random_proj$Simulation[j] <- i
+  }
+  
+  #Keep the table with the simulation number
+  if (i == 1){
+    Simulations <- random_proj
+  } else {
+    Simulations <- bind_rows(Simulations, random_proj)
+  }
+  
+} 
+
+st_geometry(Simulations) <- NULL
+write.csv(Simulations, "../exported-data/Distances_random distrib/Random_jumpersPA_DP16GS15.csv", row.names = F)
+
+#Calculate the mean distance per simulation
+Random_jumpers_subsamples %<>% group_by(Code) %>% 
+  summarise(MeanDistToRail = mean(DistToRail),
+            MeanDistToRoad = mean(DistToRoad),
+            MeanDistToAirport = mean(DistToAirport))
+
+
+```
+
+
+
+
+```{r map of random points for jumpers, fig.width= 6, fig.height=7, eval = FALSE}
+# Check on the first randomly generated dataset that the points location corresponds to the expectation in each disk portion (Figure 2).
+
+ggplot(data = pennsylvania) +
+    geom_sf(data = pennsylvania, fill = "white") +
+    geom_point(data = Simulations,
+            aes(x = longitude_rounded, y = latitude_rounded), shape = 19, size = 2) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+```
+
+
+
+
+```{r plot null distribution to high risk, fig.height=2, fig.width = 6, fig.cap="Comparison of the distance of jumpers to high-risk areas to a random distribution."}
+MeanDistances <- read.csv("../Distances_random distrib/means_randomjumpersPA_highrisk.csv")
+highrisk.quant <- quantile(MeanDistances$MeanHighRisk,c(.025,.975))
+
+random_jumperstohighrisk <- ggplot(data = MeanDistances, aes(x =  MeanHighRisk)) +
+  geom_histogram(aes(x =  MeanHighRisk/1000), binwidth= 0.1, col = "black") +
+  geom_vline(xintercept = mean(jumpersPA_proj$DistToHighRisk)/1000, size = 1, col = "red") +
+  # geom_vline(xintercept = mean(diffusersPA_proj$DistToHighRisk)/1000, size = 1, col = "blue") +
+  # geom_vline(xintercept = mean(undetectedPA_proj$DistToHighRisk)/1000, size = 1, col = "green") +
+  geom_vline(xintercept = highrisk.quant[1]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = highrisk.quant[2]/1000, size = 1, col = "black") +
+  xlab("Distance (km)") +
+  ylab("") +
+  coord_cartesian(xlim = c(0, 5)) + 
+  ggtitle("High risk areas") +
+  theme_classic()
+
+random_jumperstohighrisk
+
+ggsave("../figures/vignette_highrisk/random_jumperstohighrisk.jpg", random_jumperstohighrisk, width = 6, height = 3)
+```
+
+We can visualize the results on Figure 2. The histogram represents the distribution of distances to high-risk areas under the null hypothesis of random dispersal of jumpers. The black vertical lines indicate the significance limits. An observed value situated outside of these vertical lines leads to the rejection of the null hypothesis. The red line indicates the average distance between jumpers and high-risk areas observed in our dataset. The observed location of jumpers is significantly closer than random to high-risk areas.  
+
+
+Here again, the generation of 9,999 simulated datasets is much longer for diffusive spread and non-detections because these datasets are much bigger. As a first approach, we bootstrap the diffusers and undetected datasets, to obtain average distances based on datasets with the same number of surveys as of jumpers. We sample 45 points in the diffusers and undetected datasets (with the same share between disk portions as the jumpers), take the average distance to each transport, and repeat 9,999 times to obtain an average value that can be compared to the random distribution that we already have, before leading time-consuming simulations.
+
+
+```{r Subsample the name number of diffusers, undetected and total as of jumpers, eval = FALSE}
+DiffusersPA_bootstrap <- data.frame(DistToHighRisk = rep(NA, 10000))
+UndetectedPA_bootstrap <- data.frame(DistToHighRisk = rep(NA, 10000))
+TotalPA_bootstrap <- data.frame(DistToHighRisk = rep(NA, 10000))
+
+for (k in 1:10000){
+jumpersPA_portions <- as.data.frame(table(jumpersPA_proj$portion))
+DiffusersPA_sample <- NULL
+UndetectedPA_sample <- NULL
+TotalPA_sample <- NULL
+
+#Generate one dataset
+  for (i in jumpersPA_portions$Var1){
+    samplesize = as.numeric(jumpersPA_portions %>% dplyr::filter(Var1 == i) %>%  dplyr::select(Freq))
+    
+    #sample each portion of diffusers
+    diffusersPA_proj_portioni = diffusersPA_proj %>% dplyr::filter(portion == i) %>% dplyr::select(portion, DistToHighRisk)
+    DiffusersPA_subsample <- diffusersPA_proj_portioni[sample(nrow(diffusersPA_proj_portioni), size = samplesize, replace = FALSE),]
+    DiffusersPA_sample <- rbind(DiffusersPA_sample, DiffusersPA_subsample)
+    
+    #sample each portion of undetected
+    undetectedPA_proj_portioni = undetectedPA_proj %>% dplyr::filter(portion == i) %>% dplyr::select(portion, DistToHighRisk)
+    UndetectedPA_subsample <- undetectedPA_proj_portioni[sample(nrow(undetectedPA_proj_portioni), size = samplesize, replace = FALSE),]
+    UndetectedPA_sample <- rbind(UndetectedPA_sample, UndetectedPA_subsample)
+    
+    #sample each portion of total
+    totalPA_portioni = totalPA %>% dplyr::filter(portion == i) %>% dplyr::select(portion, DistToHighRisk)
+    totalPA_subsample <- totalPA_portioni[sample(nrow(totalPA_portioni), size = samplesize, replace = FALSE),]
+    TotalPA_sample <- rbind(TotalPA_sample, totalPA_subsample)
+  
+  }
+
+# Take the average of each dataset and put it in a table
+  DiffusersPA_bootstrap$DistToHighRisk[k] <- mean(DiffusersPA_sample$DistToHighRisk)
+  UndetectedPA_bootstrap$DistToHighRisk[k] <- mean(UndetectedPA_sample$DistToHighRisk)
+  TotalPA_bootstrap$DistToHighRisk[k] <- mean(TotalPA_sample$DistToHighRisk)
+
+} 
+
+write.csv(DiffusersPA_bootstrap, "../exported-data/DiffusersPA_bootstrap.csv", row.names = F)
+write.csv(UndetectedPA_bootstrap, "../exported-data/UndetectedPA_bootstrap.csv", row.names = F)
+write.csv(TotalPA_bootstrap, "../exported-data/TotalPA_bootstrap.csv", row.names = F)
+
+```
+ 
+
+
+```{r plot null distribution to high risk with other categories, fig.height=2, fig.width = 6, fig.cap="Comparison of the distance of jumpers, diffusers and non-detections to high-risk areas to a random distribution."}
+MeanDistances <- read.csv("../Distances_random distrib/means_randomjumpersPA_highrisk.csv")
+highrisk.quant <- quantile(MeanDistances$MeanHighRisk,c(.025,.975))
+DiffusersPA_bootstrap <- read.csv("../exported-data/DiffusersPA_bootstrap.csv")
+UndetectedPA_bootstrap <- read.csv("../exported-data/UndetectedPA_bootstrap.csv")
+TotalPA_bootstrap <- read.csv("../exported-data/TotalPA_bootstrap.csv")
+
+
+random_tohighrisk <- ggplot(data = MeanDistances, aes(x =  MeanHighRisk)) +
+  geom_histogram(aes(x =  MeanHighRisk/1000), binwidth= 0.1, col = "black") +
+  geom_vline(xintercept = mean(jumpersPA_proj$DistToHighRisk)/1000, size = 1, col = "red") +
+  geom_vline(xintercept = mean(DiffusersPA_bootstrap$DistToHighRisk, na.rm=TRUE)/1000, size = 1, col = "blue") +
+  geom_vline(xintercept = mean(UndetectedPA_bootstrap$DistToHighRisk, na.rm=TRUE)/1000, size = 1, col = "green") +
+  geom_vline(xintercept = highrisk.quant[1]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = highrisk.quant[2]/1000, size = 1, col = "black") +
+  xlab("Distance (km)") +
+  ylab("") +
+  coord_cartesian(xlim = c(0, 5)) + 
+  ggtitle("High risk areas") +
+  theme_classic()
+
+random_tohighrisk
+
+ggsave("../figures/vignette_highrisk/random_tohighrisk.jpg", random_tohighrisk, width = 6, height = 3)
+```
+
+
+Figure 3 shows the significance of the observed distances of diffusers (blue line) and non-detections (green line) to high risk areas, compared to a random distribution. Jumpers are significantly closer to high risk areas than random, more than diffusers. The notable difference with transports is that non-detections are randomly situated relative to high risk areas, and not farther than random.
+
+
+
+
+\newpage  
+
+# 2. Intersection of risk zones
+
+If we create a buffer around roads and railways so as to include all jumpers, we can design a map of locations at risk of jump dispersal (Figure 8). In other words, all jump dispersal identified so far occurred within the orange buffer. This type of map can be used to concentrate survey efforts on locations considered at risk based on spread records.
+
+```{r show buffer intersecting road and rail, fig.height=4, fig.width = 6, fig.cap="Buffer zones around railways and roads that include all jumpers"}
+
+max(jumpers_DP16GS15$DistToAirport) #30295.97 m
+quantile(jumpers_DP16GS15$DistToAirport,c(.025,.975))
+
+max(jumpers_DP16GS15$DistToRail) #21189 m
+quantile(jumpers_DP16GS15$DistToRail,c(.025,.975)) #10829 m 
+quantile(jumpers_DP16GS15$DistToRail,c(.05,.95)) # 8391 m
+quantile(jumpers_DP16GS15$DistToRail,c(.1,.9)) # 4889 m
+
+max(jumpers_DP16GS15$DistToRoad) #10360.52 m
+quantile(jumpers_DP16GS15$DistToRoad,c(.025,.975)) #3172 m 
+quantile(jumpers_DP16GS15$DistToRoad,c(.05,.95)) # 2031 m
+quantile(jumpers_DP16GS15$DistToRoad,c(.1,.9)) # 1211 m
+
+
+Railroad_buffer <- st_read("../GIS/intersect_road_rail_jumpers_100.shp", quiet = T)
+
+Buffer_risk <- ggplot(data = world) +
+    geom_sf() +
+    geom_sf(data = states, fill = "white") +
+    geom_sf(data = Railroad_buffer, fill = "orange") +
+    coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+Buffer_risk
+
+# ggsave("../figures/vignette_highrisk/bufferrisk_railroad.jpg", Buffer_risk, width = 6, height = 4)
+```
+
+
+High-risk areas were listed because they concentrate flow of people. It is interesting to see if they are situated in the buffer where actual jump events were found.
+
+```{r show buffer intersecting road and rail with high risk areas, fig.height=4, fig.width = 6, fig.cap="Location of high-risk areas relative to the buffer zones including all jumpers"}
+HighRiskLoc <- st_read("../GIS/HighRiskLoc.shp", quiet = T)
+
+Highrisk_buffer <- ggplot(data = world) +
+    geom_sf() +
+    geom_sf(data = states, fill = "white") +
+    # geom_sf(data = Railroad_buffer, fill = "orange") +
+  geom_sf(data = HighRiskLoc, aes(col = InBuffer)) +
+    coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+Highrisk_buffer
+
+# ggsave("../figures/vignette_highrisk/highrisk_buffer.jpg", Highrisk_buffer, width = 6, height = 6)
+```
+
+The green-blue dots represent high-risk area situated within the risk buffer, and red points are high-risk areas outside of this buffer (Figure 9). A substantial proportion of high-risk areas are thus at risk. We can look further into it by checking whether this varies between categories of high-risk areas.
+
+```{r barplot of the proportion of high-risk locations included in risk buffer per category, fig.height=3, fig.width = 9, fig.cap="Proportion of in-buffer high-risk locations per category"}
+
+Prophighrisk_inbuffer <- ggplot(HighRiskLoc, aes(x = category)) + 
+  geom_bar(aes(fill = InBuffer), position="fill") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+Prophighrisk_inbuffer
+
+# ggsave("../figures/vignette_highrisk/Prophighrisk_inbuffer.jpg", Prophighrisk_inbuffer, width = 9, height = 3)
+```
+
+We notice on Figure 10 that most campgrounds, race tracks, saw mills and summer camps are situated outside of the risk buffer. It could mean that these locations are generally not at risk compared to the others.
+
+\newpage 
+
+# 3. Model selection
+
+
+
+```{r binomial model}
+grid_DP16GS15 %<>% mutate(Jump = ifelse(Category == "Jumpers", 1, 0))
+table(grid_DP16GS15$Category, grid_DP16GS15$Jump)
+table(grid_DP16GS15$Jump)
+
+# Test effect of candidate variables
+library(MuMIn)
+install.packages("AICcmodavg")
+library(AICcmodavg)
+install.packages("reshape")
+library(reshape)
+library(data.table)
+
+fullmodel <- glm(Jump ~ scale(DistToRoad) + scale(DistToRail) + scale(DistToAirport), data = grid_DP16GS15, family = binomial, na.action = na.fail)
+plotresid(fullmodel)
+summary(fullmodel)
+chat = fullmodel$deviance/fullmodel$df.residual
+
+dredge(fullmodel, rank = AICc, extra="R^2")
+dredge(fullmodel, rank = QAICc, extra="R^2", chat=chat)
+
+model_airports <- glm(Jump ~ DistToAirport, family = binomial, data = grid_DP16GS15)
+model_rail <- glm(Jump ~ DistToRail, family = binomial, data = grid_DP16GS15)
+model_road <- glm(Jump ~ DistToRoad, family = binomial, data = grid_DP16GS15)
+
+#Prediction
+DistToRail = scale(seq(0,100, length.out = 11))
+DistToRoad = scale(seq(0, 100, length.out = 11))
+DistToAirport = scale(seq(0, 100, length.out = 11))
+
+newdata <- CJ(DistToRail, DistToRoad, DistToAirport)
+
+newdata %<>% add_column(fullmodel = predict(fullmodel, newdata = newdata, type = "response"))
+
+ggplot(newdata) + 
+  geom_point(aes(x = DistToRail, y = fullmodel)) +
+  ylim(c(0,1))+
+  theme_classic() +
+  ylab("Probability of a jump") +
+  xlab("Distance to a railroad (scaled)")
+  
+
+```
+
+
+\newpage 
+
+# 4. Results and conclusion
+
+
+In this vignette, we found that:  
+
+(1) Jumpers and diffusers are situated significantly close to high-risk areas. These high-risk areas could be preferential locations for the progression of the invasion.
+
+(2) We created a risk buffer around transport infrastructures comprising all jump events so far. This risk buffer could be used as a guide to focus survey efforts and ensure an early detection of future jump events.
+
+(3) Some categories of high-risk areas are not as close to transport infrastructures as others, and are not situated in the risk buffer. Namely, campgrounds, race tracks, saw mills and summer camps might not be considered as high-risk areas based on these analyses. 
+
+
+This vignette concludes a series of 3 vignettes on the analysis of spread records of the spotted lanternfly. Results can be used to improve our knowledge of SLF dispersal, to follow the evolution of the invasion, and to direct survey efforts.

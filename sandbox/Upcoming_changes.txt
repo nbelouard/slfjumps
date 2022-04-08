@@ -1,0 +1,2 @@
+A new version of these vignettes, including parameters optimization (gap size, number of disk portions, grid rotations) for the removal of false-positive and false-negative, will shortly be available.
+Results are expected to be qualitatively identical, but the methods will be more robust.

@@ -1,0 +1,953 @@
+---
+title: "Old_functions"
+author: "Nadege Belouard"
+date: "3/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r determine quadrant}
+
+# # Code fixed for 4 quadrants
+# grid_data <- grid_data %>%
+#   mutate(quadrant = NA)
+# 
+# for (i in 1:length(grid_data$latitude_rounded)) {
+#   if (grid_data$latitude_rounded[i] < centroid[2]) {
+#     if (grid_data$longitude_rounded[i] < centroid[1]) {
+#       grid_data$quadrant[i] <- "SW"
+#     } else {
+#       grid_data$quadrant[i] <- "SE"
+#     }
+#   }
+#   if (grid_data$latitude_rounded[i] > centroid[2]) {
+#     if (grid_data$longitude_rounded[i] < centroid[1]) {
+#       grid_data$quadrant[i] <- "NW"
+#     } else {
+#       grid_data$quadrant[i] <- "NE"
+#   } 
+#   }
+# } 
+
+# #Order the factor for next plots
+# grid_data$quadrant <- factor(grid_data$quadrant, levels=c("NW", "NE", "SW", "SE"))
+
+  
+```
+
+```{r function to calculate dispersal thresholds GRAPHICALLY}
+
+threshold_jump_graphic <- function(dataset, gap_size = 10) {
+  # Initialize values
+  i = 1
+  irounded = 1
+  j = 2
+  jrounded = 2
+  
+  # Order the variable by increasing order
+  distance_sorted <- sort(dataset$DistToIntro) 
+  
+  # Loops until it finds the threshold or the variable is finished
+  while ( (irounded + gap_size > jrounded) & (j <= length(distance_sorted)) ) { 
+    # Round i and j to the next tens of units
+    irounded = RoundTo(distance_sorted[i], multiple = 10, FUN = ceiling)
+    jrounded = RoundTo(distance_sorted[j], multiple = 10, FUN = floor)
+    i = i+1
+    j = j+1
+  }
+
+  if (irounded + gap_size > jrounded){ # there is no jump
+    threshold = distance_sorted[i]
+  } else { #there is a jump
+    threshold = distance_sorted[i-1]
+  }
+  
+  rowNumber = which(grepl(threshold, dataset$DistToIntro))
+  results <- list("threshold_survey" = dataset[rowNumber,],
+       "jump_survey" = dataset %>% filter(DistToIntro > threshold))
+  
+  return(results)
+}
+
+```
+
+
+
+```{r test of the program}
+
+threshold_jump_graphic(grid_data %>% filter(Status == "Established" & bio_year == 2018 & quadrant == "NW"), gap_size = 10)
+
+
+#Graphical verification
+spread_distances <- ggplot(data = grid_data %>% filter(Status == "Established" & bio_year == 2018 & quadrant == "NW"), aes(x = DistToIntro)) + 
+  geom_histogram(data = grid_data %>% filter(Status == "Established" & bio_year == 2018 & quadrant == "NW"), aes(x = DistToIntro, fill = Status), 
+                 breaks = seq(0,200,10)) +
+  xlab("Distance from the introduction site (km)") +
+  ylab("Number of survey locations") +
+  ggtitle("Histogram of distances to the introduction site")+
+  theme(plot.title = element_text(hjust = 0.5, size=12), legend.position = "top")
+
+spread_distances
+
+```
+
+
+
+```{r function to calculate dispersal thresholds ACTUAL GAP SIZE}
+
+threshold_jump_numeric <- function(dataset, gap_size = 10) {
+  # Initialize values
+  i = 1
+  distancei = 1
+  j = 2
+  distancej = 2
+    
+  # Order the variable by increasing order
+  distance_sorted <- sort(dataset$DistToIntro) 
+  
+  # Loops until it finds the threshold or until the variable is finished
+  while ( (distancei + gap_size > distancej) & (j <= length(distance_sorted)) ) { 
+    distancei = distance_sorted[i]
+    distancej = distance_sorted[j]
+    i = i+1
+    j = j+1
+  }
+  
+  if (distancei + gap_size > distancej) { # there is no jump
+    threshold = distance_sorted[i]
+  } else { #a jump was found, take the previous iteration
+    threshold = distance_sorted[i-1]
+  }
+  
+  #Find the threshold survey in the initial table (not ordered)
+  rowNumber = which(grepl(threshold, dataset$DistToIntro))
+  
+  #Store results in an object
+  results <- list("threshold_survey" = dataset[rowNumber,],
+       "jump_survey" = dataset %>% filter(DistToIntro > threshold))
+  
+  return(results)
+}
+
+```
+
+
+```{r test of the program}
+
+threshold_jump_numeric(grid_data %>% filter(Status == "Established" & bio_year == 2018 & quadrant == "NW"), gap_size = 10)
+
+
+#Graphical verification
+spread_distances <- ggplot(data = grid_data %>% filter(Status == "Established" & bio_year == 2018 & quadrant == "NW"), aes(x = DistToIntro)) + 
+  geom_histogram(data = grid_data %>% filter(Status == "Established" & bio_year == 2018 & quadrant == "NW"), aes(x = DistToIntro, fill = Status), 
+                 breaks = seq(0,80,1)) +
+  xlab("Distance from the introduction site (km)") +
+  ylab("Number of survey locations") +
+  ggtitle("Histogram of distances to the introduction site")+
+  theme(plot.title = element_text(hjust = 0.5, size=12), legend.position = "top")
+
+spread_distances
+
+```
+
+
+```{r program that runs this function for each quadrant and year}
+
+threshold_jump_multiple_num <- function(dataset, 
+                                    quadrant = c("NE", "NW", "SW", "SE"), 
+                                    bio_year = c(2014:2019), 
+                                    gap_size = 10) {
+  
+  #Initialize variables for the results
+  Dist = NULL
+  Jump = NULL
+
+  for (q in quadrant){
+    dataset_n = NULL
+    jumpers_quadrant = data.frame(DistToIntro = 0)
+    for (y in bio_year){
+     assign(paste0(q,"_", y), y)
+      
+      #Select the dataset. We assume that no population is going extinct over the years and cumulate datasets.   
+      dataset_n <- rbind(dataset_n, dataset %>% filter(quadrant == q & bio_year == y & Status == "Established"))
+      
+      # Initialize values
+      i = 1
+      distancei = 1
+      j = 2
+      distancej = 2
+    
+      # Order the variable by increasing order
+      distance_sorted <- sort(dataset_n$DistToIntro) 
+  
+      # Loop until it finds the threshold or until the variable is finished
+      while ( (distancei + gap_size > distancej) & (j <= length(distance_sorted)) ) { 
+      distancei = distance_sorted[i]
+      distancej = distance_sorted[j]
+      i = i+1
+      j = j+1
+        }
+  
+      if (distancei + gap_size > distancej) { # there is no jump
+        threshold = distance_sorted[i]
+        } else { #a jump was found, take the previous iteration
+        threshold = distance_sorted[i-1]
+        }
+      
+      #Find the threshold survey in the initial table (not ordered)
+      rowNumber = which(grepl(threshold, dataset_n$DistToIntro))  
+  
+      #Store results in objects
+      threshold_survey = dataset_n[rowNumber,]
+      jump_survey = dataset_n %>% filter(DistToIntro > threshold)
+      jumpers_qy = NULL
+
+      # Are surveys in the list of jump surveys real new jumps or just diffusion of secondary introductions from the previous year?
+      for (jump_dist in jump_survey$DistToIntro) {
+        if ((jump_dist - max(jumpers_quadrant$DistToIntro)) > gap_size) {
+          # select the line
+          rowNumber_jumper = which(grepl(jump_dist, jump_survey$DistToIntro))
+          # add it to the list
+          jumpers_qy <- rbind(jump_survey[rowNumber_jumper,], jumpers_qy)  
+            }
+          }
+      
+      # Add results at each iteration
+      Dist = rbind(Dist, threshold_survey)
+      jumpers_quadrant = dplyr::bind_rows(jumpers_quadrant, jumpers_qy)
+    }
+    Jump = rbind(Jump, jumpers_quadrant[-1,])
+}
+
+  results <- list("Dist" = Dist, "Jump" = Jump)
+  
+  return(results)
+} 
+
+``` 
+
+
+
+```{r function to check if a jump is 10 miles further than another jump - only FURTHER, cannot be closer to the core}
+
+      # Are surveys in the list of jump surveys real new jumps or just diffusion of secondary introductions from the previous year?
+      for (jump_dist in jump_survey$DistToIntro) {
+        if ((jump_dist - max(jumpers_portion$DistToIntro)) > gap_size) {
+          # select the line
+          rowNumber_jumper = which(grepl(jump_dist, jump_survey$DistToIntro))
+          # add it to the list
+          jumpers_py <- rbind(jump_survey[rowNumber_jumper,], jumpers_py)  
+          
+```
+
+
+
+```{r sensitivity analysis}
+
+Results_gap16_portions4 <- threshold_jump_multiple_num(grid_data_4slices, gap_size = 16, portion = seq(1:4))
+Results_gap16_portions6 <- threshold_jump_multiple_num(grid_data_6slices, gap_size = 16, portion = seq(1:6))
+Results_gap16_portions8 <- threshold_jump_multiple_num(grid_data_8slices, gap_size = 16, portion = seq(1:8))
+Results_gap16_portions16 <- threshold_jump_multiple_num(grid_data_16slices, gap_size = 16, portion = seq(1:16))
+
+Results_gap10_portions4 <- threshold_jump_multiple_num(grid_data_4slices, gap_size = 10, portion = seq(1:4))
+Results_gap10_portions6 <- threshold_jump_multiple_num(grid_data_8slices, gap_size = 10, portion = seq(1:6))
+Results_gap10_portions8 <- threshold_jump_multiple_num(grid_data_8slices, gap_size = 10, portion = seq(1:8))
+Results_gap10_portions16 <- threshold_jump_multiple_num(grid_data_16slices, gap_size = 10, portion = seq(1:16))
+
+Results_gap5_portions4 <- threshold_jump_multiple_num(grid_data_4slices, gap_size = 5, portion = seq(1:4))
+Results_gap5_portions8 <- threshold_jump_multiple_num(grid_data_8slices, gap_size = 5, portion = seq(1:8))
+Results_gap5_portions16 <- threshold_jump_multiple_num(grid_data_16slices, gap_size = 5, portion = seq(1:16))
+
+
+NbJumps <- data.frame(rbind(Gap16_portions4 = dim(Results_gap16_portions4$Jump), #51
+                 Gap16_portions8 = dim(Results_gap16_portions8$Jump),
+                 Gap16_portions16 = dim(Results_gap16_portions16$Jump), #143
+                 Gap10_portions4 = dim(Results_gap10_portions4$Jump),
+                 Gap10_portions8 = dim(Results_gap10_portions8$Jump),
+                 Gap10_portions16 = dim(Results_gap10_portions16$Jump),
+                 Gap5_portions4 = dim(Results_gap5_portions4$Jump),
+                 Gap5_portions8 = dim(Results_gap5_portions8$Jump),#79
+                 Gap5_portions16 = dim(Results_gap5_portions16$Jump))) #548
+NbJumps$Parameters <- rownames(NbJumps)
+colnames(NbJumps)[1] <- "NbJumps"
+
+
+NbJumps$Parameters <- factor(NbJumps$Parameters, levels=c("Gap16_portions4", "Gap16_portions8", "Gap16_portions16",
+                                                          "Gap10_portions4", "Gap10_portions8", "Gap10_portions16",
+                                                          "Gap5_portions4", "Gap5_portions8", "Gap5_portions16"))
+
+
+ggplot(NbJumps, aes(x=Parameters, y=NbJumps, label=Parameters)) + 
+  geom_point(stat='identity', fill="black", size=6) +
+  coord_cartesian(ylim = c(0, 200)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+```
+
+
+
+```{r map of jumpers gap 10, fig.height=8, fig.width=8}
+
+ggplot(data = world) +
+    geom_sf() +
+    geom_sf(data = states, fill = "white") + 
+    # coord_sf(xlim = c(-84, -71), ylim = c(34, 45), expand = FALSE) +
+    coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+    geom_point(data = grid_data %>% filter(Status == "Established" & bio_year %in% c(2014:2017)),
+            aes(x = longitude_rounded, y = latitude_rounded), col = "darkgrey", 
+            shape = 19, size = 2) +
+    geom_point(data=grid_data,
+             aes(x = centroid[1], 
+                 y = centroid[2]),
+             col = "blue", shape = 4, size = 5) +
+  geom_point(data = Results_gap10_portions8$Jump %>% filter(bio_year %in% c(2014:2017)),
+            aes(x = longitude_rounded, y = latitude_rounded),
+            col = "red", shape = 19, size = 2) +
+    geom_point(data = Results_gap10_portions6$Jump %>% filter(bio_year %in% c(2014:2017)),
+            aes(x = longitude_rounded, y = latitude_rounded),
+            col = "blue", shape = 19, size = 2) +
+    geom_point(data = Results_gap10_portions4$Jump %>% filter(bio_year %in% c(2014:2017)),
+            aes(x = longitude_rounded, y = latitude_rounded),
+            col = "green", shape = 19, size = 2) +
+    geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+```
+
+
+```{r sample random points per quadrants}
+
+maxlat <- max(jumpers$latitude_r)
+minlat <- min(jumpers$latitude_r)
+maxlong <- max(jumpers$longitude_)  
+minlong <- min(jumpers$longitude_)
+
+
+NW <- jumpers %>% filter(quadrant == "NW")
+SeqlatNW <- seq(from = centroid[2], to = maxlat, by = 1/111)
+SeqlongNW <- seq(from = minlong, to = centroid[1], by = 1/79)
+
+NE <- jumpers %>% filter(quadrant == "NE")
+SeqlatNE <- seq(from = centroid[2], to = maxlat, by = 1/111)
+SeqlongNE <- seq(from = centroid[1], to = maxlong, by = 1/79)
+
+SW <- jumpers %>% filter(quadrant == "SW")
+SeqlatSW <- seq(from = minlat, to = centroid[2], by = 1/111)
+SeqlongSW <- seq(from = minlong, to = centroid[1], by = 1/79)
+
+SE <- jumpers %>% filter(quadrant == "SE")
+SeqlatSE <- seq(from = minlat, to = centroid[2], by = 1/111)
+SeqlongSE <- seq(from = centroid[1], to = maxlong, by = 1/79)
+
+MeanDistances <- data.frame(MeanAirport = rep(NA, 10000), 
+                      MeanRail = rep(NA, 10000),
+                      MeanRoad = rep(NA, 10000))
+
+
+
+library(sf)
+
+for (i in 1:5000){
+    #Generate a set of coordinates
+  print(i)
+  LatitudeNW <- sample(SeqlatNW, size = length(NW$latitude_r), replace = TRUE)
+  LongitudeNW <- sample(SeqlongNW, size = length(NW$longitude_), replace = TRUE)
+  
+  Latitude <- c(LatitudeNW, LatitudeNE, LatitudeSW, LatitudeSE)
+  Longitude <- c(LongitudeNW, LongitudeNE, LongitudeSW, LongitudeSE)
+  
+  VirtualCoordinates <- data.frame(x = Longitude, y = Latitude,
+                                   DistToAirport = rep(NA, length(jumpers$latitude_r)),
+                                   DistToRail = rep(NA, length(jumpers$latitude_r)),
+                                   DistToRoad = rep(NA, length(jumpers$latitude_r)))
+  
+  
+  sample <- st_as_sf(x = VirtualCoordinates, coords = c("x", "y"), crs = 4326)
+  sample <- st_transform(sample, crs = st_crs(rail) )
+  
+```
+  
+  
+  
+  
+  
+```{r program that runs this function for each quadrant and year}
+
+threshold_jump_multiple_num <- function(dataset, 
+                                    portion = seq(1:8), 
+                                    bio_year = c(2014:2020), 
+                                    gap_size = 10) {
+  
+  #Initialize variables for the results
+  Dist = NULL
+  Jump = NULL
+
+  for (p in portion){
+    dataset_n = NULL
+    jumpers_portion = data.frame(DistToIntro = 0)
+    for (y in bio_year){
+     assign(paste0(p,"_", y), y)
+      
+      #Select the dataset. We assume that no population is going extinct over the years and cumulate datasets.   
+      dataset_n <- rbind(dataset_n, dataset %>% filter(portion == p & bio_year == y & Status == "Established"))
+      
+      # Initialize values
+      i = 1
+      distancei = 1
+      j = 2
+      distancej = 2
+    
+      # Order the variable by increasing order
+      distance_sorted <- sort(dataset_n$DistToIntro) 
+  
+      # Loop until it finds the threshold or until the variable is finished
+      while ( (distancei + gap_size > distancej) & (j <= length(distance_sorted)) ) { 
+      distancei = distance_sorted[i]
+      distancej = distance_sorted[j]
+      i = i+1
+      j = j+1
+        }
+  
+      if (distancei + gap_size > distancej) { # there is no jump
+        threshold = distance_sorted[i]
+        } else { #a jump was found, take the previous iteration
+        threshold = distance_sorted[i-1]
+        }
+      
+      #Find the threshold survey in the initial table (not ordered)
+      rowNumber = which(grepl(threshold, dataset_n$DistToIntro))  
+  
+      #Store results in objects
+      threshold_survey = dataset_n[rowNumber,]
+      # Make sure the threshold is associated to the correct year, even if the threshold is the same as the year before
+      threshold_survey$bio_year <- y
+      jump_survey = dataset_n %>% filter(DistToIntro > threshold)
+      jumpers_py = NULL
+
+      # Are surveys in the list of jump surveys real new jumps or just diffusion of secondary introductions from the previous year?
+      # i.e. are new jumpers less than 10 miles from a previous jump?
+      for (jump_dist in jump_survey$DistToIntro) {
+        difference = jumpers_portion$DistToIntro - jump_dist #distance between the jumper and the others
+        if (min(abs(difference)) > gap_size) {
+          # select the line
+          rowNumber_jumper = which(grepl(jump_dist, jump_survey$DistToIntro))
+          # add it to the list
+          jumpers_py <- rbind(jump_survey[rowNumber_jumper,], jumpers_py)
+            }
+      }
+
+      # Add results at each iteration
+      Dist = rbind(Dist, threshold_survey)
+      jumpers_portion = dplyr::bind_rows(jumpers_portion, jump_survey)
+    }
+    Jump = rbind(Jump, jumpers_portion[-1,])
+}
+
+  results <- list("Dist" = Dist, "Jump" = Jump)
+  
+  return(results)
+} 
+
+``` 
+
+
+
+
+
+```{r generate a random distribution of points for jumpers, eval = FALSE}
+
+
+### Generate random dispersal: 9999 simulations of n = 75 points (= nb of jumpers)
+jumpers <- jumpers_proj
+
+# Generate a dataset of random points, with the same number of points as there are points per portion in the jumpers dataset
+nb_slices = 8
+angle_portion = 2*pi/nb_slices
+MeanDistances <- data.frame(MeanAirport = rep(NA, 1000), 
+                            MeanRail = rep(NA, 1000),
+                            MeanRoad = rep(NA, 1000)) 
+
+#Loop 1: Generate 9,999 datasets of 75 random points
+for (k in 1:1){
+  
+  # Sample angles and distances from the centroid for the right number of points per quadrant
+  Theta = NULL
+  Distance = NULL
+  centroid <- c(40.415240, -75.675340)
+  centroid_rad <- centroid * pi/180
+  R = 6378.1 #Radius of the Earth
+  
+  
+  ########### Loop 2: generate 1 dataset of coordinates for 75 samples
+  
+  for (i in as.numeric(jumpers$portion)){
+    
+    #Generate a set of coordinates: theta and distance
+    #Sample theta within the boundaries of each wedge
+        # IMPORTANT NOTE: here, theta designates the angle between the north and the point. 
+    # It is not the same theta as previously in the initial designation of the disk portions
+    # There is a 90 degrees or 3pi/2 rotation
+    Theta_sampled <- sample(seq(from = angle_portion*(i-1)-3*pi/2, to = angle_portion*i-3*pi/2, by = 0.0001), size = 1, replace = TRUE)
+    #Sample distance to origin within the boundaries of each wedge
+    maxdist = max(grid_data %>% filter(portion == i, Status == "Established") %>% pull(DistToIntro))
+    Distance_sampled <- sample(seq(from = 0, to = maxdist, by = 0.0001), size = 1, replace = TRUE)
+    
+    # Append vectors of samples
+    Theta <- append(Theta, Theta_sampled)
+    Distance <- append(Distance, Distance_sampled)
+    
+  }
+    # Convert samples coordinates from polar to geographic
+    Lat_rad = asin(sin(centroid_rad[1])*cos(Distance/R) + cos(centroid_rad[1])*sin(Distance/R)*cos(Theta))
+    Lon_rad = centroid_rad[2] + atan2(sin(Theta)*sin(Distance/R)*cos(centroid[1]), cos(Distance/R)-sin(centroid[1])*sin(Lat_rad))
+    
+    # Convert samples coordinates from radians to degrees
+    Lat_deg = Lat_rad * 180/pi
+    Lon_deg = Lon_rad * 180/pi
+    
+    # Create a table with everything
+    VirtualCoordinates <- data.frame(Theta = Theta, Distance = Distance,
+                                     Latitude = Lat_deg,
+                                     Longitude = Lon_deg)
+    
+    ########## Loop 3: calculates distances for each point
+
+    random <- VirtualCoordinates %>% mutate(DistToAirport = NA,
+                                            DistToRail = NA,
+                                            DistToRoad = NA)
+    random_layer <- st_as_sf(x = random, coords = c("Longitude", "Latitude"), crs = 4326)
+    random_proj <- st_transform(random_layer, crs = st_crs(rail) )
+
+
+    for (j in 1:length(random_proj$DistToAirport)){ #Calculate their distance to transport infrastructures
+
+      dist_airport <- st_distance(x = random_proj[j,], y = airports)
+      random_proj$DistToAirport[j] <- min(dist_airport)
+      dist_rail <- st_distance(x = random_proj[j,], y = rail)
+      random_proj$DistToRail[j] <- min(dist_rail)
+      dist_road <- st_distance(x = random_proj[j,], y = road)
+      random_proj$DistToRoad[j] <- min(dist_road)
+    }
+
+    #Keep the average in a table
+
+    MeanDistances$MeanAirport[k] = mean(random_proj$DistToAirport)
+    MeanDistances$MeanRail[k] = mean(random_proj$DistToRail)
+    MeanDistances$MeanRoad[k] = mean(random_proj$DistToRoad)
+    
+    print("Done:")
+    print(k)
+
+}
+
+# write.csv2(MeanDistances, "means_random1.csv")
+
+```
+
+
+```{r function: distinguish disk portions, echo = params$display, warnings = FALSE, eval = params$run}
+
+# Determine disk portions based on trigonometry
+# A full circle is 2*pi
+# The disk portion of each point is determined by atan2(y,x), the angle of the point relative to the horizontal line of the introduction site
+
+attribute_disk_portions <- function(dataset, nb_slices = 8, centroid = c(-75.675340, 40.415240), rotations = 1) {
+  
+  # Calculate theta, the angle between the point and the horizontal line, for each point
+  x = NULL
+  y = NULL
+  # dataset$theta <- NA
+  # grid_data <- dataset
+  grid_data <- dataset %>% add_column(theta = NA)
+
+  for (i in 1:length(grid_data$longitude_rounded)) {
+    x = grid_data$longitude_rounded[i] - centroid[1]
+    y = grid_data$latitude_rounded[i] - centroid[2]
+    grid_data$theta[i] = base::atan2(y,x)
+  }
+
+    # Create variable for portion's names
+    portion_name = paste("portion_rot", k, sep = "")
+    grid_data <- grid_data %>% add_column(!! portion_name = NA)
+    # grid_data <- grid_data %>% mutate(portion = NA)
+    angle_portion = 2*pi/nb_slices
+    
+    # Attribute the right disk portion number
+    for (i in 1:length(grid_data$longitude_rounded)) {  #for each survey
+      j = 1
+      while (is.na(grid_data$portion[i]) == TRUE & j <= nb_slices){ #until the portion is found
+        if (grid_data$theta[i] < (angle_portion * j) - rotation - pi){ #find the right slice portion
+            grid_data$portion[i] = j #attribute the right disk portion number
+        } else { 
+          j = j+1
+        }
+      }
+      if (is.na(grid_data$portion[i]) == TRUE){
+        grid_data$portion[i] = 1
+      }
+    }
+  return(grid_data)
+}
+
+install.packages("sym")
+bla <- paste("portion_rot", 1, sep = "")
+grid_data$newcolname = NA
+ 
+```
+
+
+
+```{r Subsample the name number of diffusers, undetected and total as of jumpers}
+Diffusers_bootstrap <- data.frame(DistToRoad = rep(NA, 10000),
+                                  DistToRail = rep(NA, 10000),
+                                  DistToAirport = rep(NA, 10000))
+Undetected_bootstrap <- data.frame(DistToRoad = rep(NA, 10000),
+                                  DistToRail = rep(NA, 10000),
+                                  DistToAirport = rep(NA, 10000))
+
+
+
+for (k in 1:10000){
+jumpers_portions <- as.data.frame(table(jumpers_proj$portion))
+Diffusers_sample <- NULL
+Undetected_sample <- NULL
+Total_sample <- NULL
+
+#Generate one dataset
+  for (i in jumpers_portions$Var1){
+    samplesize = as.numeric(jumpers_portions %>% dplyr::filter(Var1 == i) %>%  dplyr::select(Freq))
+    
+    #sample each portion of diffusers
+    diffusers_proj_portioni = diffusers_proj %>% dplyr::filter(portion == i) %>% dplyr::select(portion, DistToRoad, DistToRail, DistToAirport)
+    Diffusers_subsample <- diffusers_proj_portioni[sample(nrow(diffusers_proj_portioni), size = samplesize, replace = FALSE),]
+    Diffusers_sample <- rbind(Diffusers_sample, Diffusers_subsample)
+    
+    #sample each portion of undetected
+    undetected_proj_portioni = undetected_proj %>% dplyr::filter(portion == i) %>% dplyr::select(portion, DistToRoad, DistToRail, DistToAirport)
+    Undetected_subsample <- undetected_proj_portioni[sample(nrow(undetected_proj_portioni), size = samplesize, replace = FALSE),]
+    Undetected_sample <- rbind(Undetected_sample, Undetected_subsample)
+    
+    #sample each portion of total
+    total_portioni = total %>% dplyr::filter(portion == i) %>% dplyr::select(portion, DistToRoad, DistToRail, DistToAirport)
+    total_subsample <- total_portioni[sample(nrow(total_portioni), size = samplesize, replace = FALSE),]
+    Total_sample <- rbind(Total_sample, total_subsample)
+  
+  }
+
+# Take the average of each dataset and put it in a table
+  Diffusers_bootstrap$DistToRoad[k] <- mean(Diffusers_sample$DistToRoad)
+  Diffusers_bootstrap$DistToRail[k] <- mean(Diffusers_sample$DistToRail)
+  Diffusers_bootstrap$DistToAirport[k] <- mean(Diffusers_sample$DistToAirport)
+
+  Undetected_bootstrap$DistToRoad[k] <- mean(Undetected_sample$DistToRoad)
+  Undetected_bootstrap$DistToRail[k] <- mean(Undetected_sample$DistToRail)
+  Undetected_bootstrap$DistToAirport[k] <- mean(Undetected_sample$DistToAirport)
+  
+  Total_bootstrap$DistToRoad[k] <- mean(Total_sample$DistToRoad)
+  Total_bootstrap$DistToRail[k] <- mean(Total_sample$DistToRail)
+  Total_bootstrap$DistToAirport[k] <- mean(Total_sample$DistToAirport)
+  
+} 
+
+```
+
+
+
+
+# 2. Are high-risk areas in high-risk areas relative to transports?
+
+```{r Distance of HRL sites to transport infrastructures, eval = FALSE}
+
+# Calculate the distances to transport infrastructures
+Highrisk_proj <- Highrisk_proj %>% mutate(DistToAirport = NA,
+                              DistToRail = NA,
+                              DistToRoad = NA)
+
+
+#Calculate their distance to transport infrastructures
+for (j in 1:length(Highrisk_proj$DistToAirport)){
+  dist_airport <- st_distance(x = Highrisk_proj[j,], y = airports)
+  Highrisk_proj$DistToAirport[j] <- min(dist_airport)
+  dist_rail <- st_distance(x = Highrisk_proj[j,], y = rail)
+  Highrisk_proj$DistToRail[j] <- min(dist_rail)
+  dist_road <- st_distance(x = Highrisk_proj[j,], y = road)
+  Highrisk_proj$DistToRoad[j] <- min(dist_road)
+  }
+
+
+#Keep the average in a table
+Highrisk_disttoairport = mean(Highrisk_proj$DistToAirport) #8 portions = 7050
+Highrisk_disttorail = mean(Highrisk_proj$DistToRail) #8 portions = 3543
+Highrisk_disttoroad = mean(Highrisk_proj$DistToRoad) #8 portions = 658
+
+# write.csv2(Highrisk_proj, "../Distances observed/Highrisk_distances.csv")
+# transient_file <- read.csv2("../Distances observed/Highrisk_distances.csv")
+# write.csv(transient_file[,-1], "../Distances observed/Highrisk_distances.csv", row.names= F)
+# transient_file_test <- read.csv("../Distances observed/Highrisk_distances.csv")
+```
+
+
+```{r }
+Highrisk_proj <- read.csv("../Distances observed/Highrisk_distances.csv")
+```
+
+
+
+```{r boxplot of distances between high risk areas and transports, fig.height=3, fig.width = 6, fig.cap="Distance of high-risk areas to transport infrastructures.", message = F}
+
+Highrisk_proj_melt <- melt(Highrisk_proj)
+
+# Plot distances 
+highrisktotransport <- ggplot(Highrisk_proj_melt, aes(y = value, x = variable)) + 
+  geom_boxplot() +
+  # coord_cartesian(ylim=c(0, 10000)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest high-risk area (m)")
+
+highrisktotransport
+
+# ggsave("../figures/vignette_highrisk/highrisktotransport.jpg", highrisktotransport, width = 6, height = 3)
+```
+
+High-risk areas are situated on average `r mean(Highrisk_proj$DistToAirport)/1000` km from airports, `r mean(Highrisk_proj$DistToRail)/1000` km from railways, and `r mean(Highrisk_proj$DistToRoad)/1000` km from major roads (see distribution in Figure 4).
+
+
+
+## Compare distances of high-risk areas to transports: visual estimation
+
+```{r compare location of high risk to transports per category, fig.height=9, fig.width = 9, fig.cap="Distance of high-risk areas to transport infrastructures, per category.", eval = FALSE}
+
+# Plot distances 
+highrisktotransport_cat <- ggplot(Highrisk_proj_melt, aes(y = value, x = category)) + 
+  geom_boxplot() +
+  facet_wrap(~variable, nrow = 3) +
+  # coord_cartesian(ylim=c(0, 10000)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  labs(x=NULL) +
+  ylab("Distance to the nearest (m)")
+
+highrisktotransport_cat
+```
+
+```{r compare location of high risk to road per category, fig.height=3, fig.width = 9, fig.cap="Distance of high-risk areas to road, per category."}
+
+# Plot distances 
+highrisktoroad_cat <- ggplot(Highrisk_proj, aes(y = DistToRoad, x = category)) + 
+  geom_boxplot() +
+  # coord_cartesian(ylim=c(0, 10000)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  labs(x=NULL) +
+  ylab("Nearest major road (m)")
+
+highrisktoroad_cat
+
+# ggsave("../figures/vignette_highrisk/highrisktoroad.jpg", highrisktoroad_cat, width = 9, height = 3)
+```
+
+All high-risk areas are close to major roads, without any category being an outlier (Figure 5).
+
+
+```{r compare location of high risk to rail per category, fig.height=3, fig.width = 9, fig.cap="Distance of high-risk areas to rail, per category."}
+# Plot distances 
+highrisktorail_cat <- ggplot(Highrisk_proj, aes(y = DistToRail, x = category)) + 
+  geom_boxplot() +
+  # coord_cartesian(ylim=c(0, 10000)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  labs(x=NULL) +
+  ylab("Nearest railroad (m)")
+
+highrisktorail_cat
+
+# ggsave("../figures/vignette_highrisk/highrisktorail.jpg", highrisktorail_cat, width = 9, height = 3)
+```
+
+Campgrounds, racetracks, sawmills and summer camps seems to be situated further from railroads than the other high-risk areas (Figure 6). They may not be as at-risk as the others.
+
+
+```{r compare location of high risk to airports per category, fig.height=3, fig.width = 9, fig.cap="Distance of high-risk areas to airports, per category."}
+
+# Plot distances 
+highrisktoairport_cat <- ggplot(Highrisk_proj, aes(y = DistToAirport, x = category)) + 
+  geom_boxplot() +
+  # coord_cartesian(ylim=c(0, 10000)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  labs(x=NULL) +
+  ylab("Nearest airport (m)")
+
+highrisktoairport_cat
+
+# ggsave("../figures/vignette_highrisk/highrisktoairport.jpg", highrisktoairport_cat, width = 9, height = 3)
+```
+
+
+
+```{r find points with outbreaks}
+
+Jumps_sum <- Jumps %>% mutate(latitude_out = RoundTo(latitude_rounded, 0.2),
+                 longitude_out = RoundTo(longitude_rounded, 0.2)) %>% 
+  count(params, bio_year, latitude_out, longitude_out)
+
+hist(Jumps_sum$n, breaks = 20)
+
+g <- ggplot(data = states) +
+  geom_point(data = grid_data_long %>% filter(diskportions == 8, rotation_nb == 1, Status == "Established", bio_year %in% c(2014:2020)),
+             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
+  geom_point(data = Jumps_sum %>% filter(n > 10),
+             aes(x = longitude_out, y = latitude_out, fill = as.factor(n)), shape = 21, size = 2) +
+  geom_text(data = states,
+            aes(X, Y, label = code), size = 4) +
+  labs(x = "Longitude", y = "Latitude")+
+  geom_sf(data = states, alpha = 0) + 
+  facet_wrap(~params, ncol = 4) +
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top")
+
+ggsave("../figures/vignette_quadrants/map_sumjumps.jpg", g, width = 15, height = 10)
+
+Jumps_sum %>% filter(n > 10) %>% select(-params) %>% unique()
+``` 
+
+
+
+
+
+```{r add a column for location}
+
+Winchester <- Jumps %>% filter(between(latitude_rounded, 39, 39.4) & between(longitude_rounded, -78.4, -78) & bio_year == 2018)
+Winchester %>% count(params)
+
+ggplot(data = states) +
+  geom_sf(data = states, fill = "white") + 
+  coord_sf(xlim = c(-79.3, -77), ylim = c(38, 40), expand = FALSE) +
+  geom_point(data = Winchester,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(bio_year)), shape = 19, size = 3) +
+  labs(x = "Longitude", y = "Latitude")+
+  theme(legend.position="top")
+
+
+Harrisburg <- Jumps %>% filter(between(latitude_rounded, 40, 40.4) & between(longitude_rounded, -77, -76.6) & bio_year == 2018)
+Harrisburg %>% count(params)
+
+ggplot(data = states) +
+  geom_sf(data = states, fill = "white") + 
+  coord_sf(xlim = c(-78, -76), ylim = c(40, 41), expand = FALSE) +
+  geom_point(data = Harrisburg,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(bio_year)), shape = 19, size = 3) +
+  labs(x = "Longitude", y = "Latitude")+
+  theme(legend.position="top")
+
+
+Jumps_location <- Jumps %>% 
+  mutate(Location = ifelse((between(latitude_rounded, 39, 39.4) & between(longitude_rounded, -78.4, -78) & bio_year == 2018), "Winchester",
+                           ifelse((between(latitude_rounded, 40, 40.4) & between(longitude_rounded, -77, -76.6) & bio_year == 2018), "Harrisburg", "Other")))
+
+
+Jumps_location$Location <- factor(Jumps_location$Location, levels = c("Harrisburg", "Winchester", "Other"))
+```
+
+
+
+
+
+
+```{r check that Winchester was surveyed before 2018}
+
+grid_data_long %>% filter(bio_year %in% c(2014:2020), diskportions == 8, rotation_nb == 1) #should have 58,330 rows 
+
+Winchester <- grid_data_long %>% filter(bio_year %in% c(2015:2018), diskportions == 8, rotation_nb == 1, 
+                          between(longitude_rounded, -79.3,-77),
+                          between(latitude_rounded, 38,40))
+
+
+map_Winchester_time <-  ggplot(data = states) +
+  geom_point(data = Winchester,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(Status)), 
+             shape = 19, size = 1) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  geom_sf(data = states, alpha = 0) + 
+  facet_wrap(~bio_year, ncol = 4) +
+  coord_sf(xlim = c(-78.5, -78), ylim = c(39, 39.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Disk portions")
+
+ggsave("../figures/vignette_quadrants/map_Winchester_time.jpg", map_Winchester_time, width = 15, height = 10)
+
+```
+
+There was one survey in Winchester in 2017 and SLF was undetected. However the year after, in 2018, SLF is established in multiple points.
+
+
+```{r check that Harrisburg was surveyed before 2018}
+
+grid_data_long %>% filter(bio_year %in% c(2014:2020), diskportions == 8, rotation_nb == 1) #should have 58,330 rows 
+
+Harrisburg <- grid_data_long %>% filter(bio_year %in% c(2015:2018), diskportions == 8, rotation_nb == 1, 
+                          between(longitude_rounded, -78,-76),
+                          between(latitude_rounded, 40,41))
+
+map_Harrisburg_time <-  ggplot(data = states) +
+  geom_point(data = Harrisburg,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(Status)), 
+             shape = 19, size = 1) +
+  geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+  geom_sf(data = states, alpha = 0) + 
+  facet_wrap(~bio_year, ncol = 4) +
+  coord_sf(xlim = c(-77, -76.5), ylim = c(40, 40.5), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude", col = "Disk portions")
+
+ggsave("../figures/vignette_quadrants/map_Harrisburg_time.jpg", map_Harrisburg_time, width = 15, height = 10)
+
+```
+
+```{r find point closest to the centroid for Winchester}
+# Winchester:
+# Find the point closest to that centroid
+# Create the shapefiles with jumpers
+Jumpers_Winchester <- Jumps_location %>% filter(Location == "Winchester") %>% 
+  select(-DistToSLF, -params) %>%
+  distinct(latitude_rounded, longitude_rounded, .keep_all=T) %>%
+  add_column(DistToCentroid = NA)
+
+Jumpers_Winchester_layer <- st_as_sf(x = Jumpers_Winchester, 
+                                     coords = c("longitude_rounded", "latitude_rounded"), 
+                                     crs = 4326, remove = F)
+Jumpers_Winchester_layer_proj <- st_transform(Jumpers_Winchester_layer)
+Centroid_Winchester <- st_as_sf(x = Jumpers_centroids %>% filter(Location == "Winchester"), 
+                                coords = c("longitude_rounded", "latitude_rounded"), 
+                                crs = 4326, remove = F)
+Centroid_Winchester_proj <- st_transform(Centroid_Winchester)
+
+# Calculate their distance to the centroid
+for (j in 1:length(Jumpers_Winchester_layer_proj$DistToCentroid)){ 
+  Jumpers_Winchester_layer_proj$DistToCentroid[j] <- st_distance(x = Jumpers_Winchester_layer_proj[j,], y = Centroid_Winchester_proj)
+}
+
+# Keep the closest point
+Winchester <- Jumpers_Winchester_layer_proj %>% slice(which.min(DistToCentroid))
+st_geometry(Winchester) <- NULL
+
+Winchester_map <- ggplot(data = states) +
+  geom_sf(data = states, fill = "white") + 
+  coord_sf(xlim = c(-78.3, -78), ylim = c(39, 39.4), expand = FALSE) +
+  geom_point(data = Jumpers_Winchester_layer_proj,
+             aes(x = longitude_rounded, y = latitude_rounded, col = as.factor(bio_year)), shape = 19, size = 3) +
+  geom_point(data = Centroid_Winchester_proj, aes(x = longitude_rounded, y = latitude_rounded)) +
+  geom_point(data = Winchester,  aes(x = longitude_rounded, y = latitude_rounded), col = "blue") +
+  labs(x = "Longitude", y = "Latitude")+
+  theme(legend.position="top")
+
+#Find this point in each set of parameters
+Winchester_set <- Jumps_location %>% filter(latitude_rounded == Winchester$latitude_rounded &
+                                              longitude_rounded == Winchester$longitude_rounded)
+```
+

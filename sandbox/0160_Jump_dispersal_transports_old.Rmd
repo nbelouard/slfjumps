@@ -1,0 +1,985 @@
+---
+title: "Making the most of invasion records, the case of the spotted lanternfly, part II: Testing the significance of the location of jumpers, diffusers, and non-detections"
+author: 
+- Nadege Belouard^[Temple University, nadege.belouard@temple.edu]
+- Sebastiona De Bona^[Temple University, seba.debona@temple.edu]
+- Jocelyn E. Behm^[Temple University, jebehm@temple.edu]
+- Matthew R. Helmus^[Temple University, mrhelmus@temple.edu]
+date: "5/1/2021"
+output:
+  pdf_document:
+    toc: TRUE
+    toc_depth: 2
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+params:
+  show_code: FALSE
+  export_figures: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup for rendering, include = F}
+# here we set the images to png, to reduce the size of the output
+# we set some global paramters in the yaml to allow us to switch the chunks
+# of code on and off when displaying
+knitr::opts_chunk$set(dpi = 300, echo = params$show_code)
+
+library(tidyverse)
+library(sf)
+library(spData)
+library(RVAideMemoire)
+library(dplyr)
+library(gridExtra)
+library(magrittr)
+library(purrr)
+library(here)
+```
+
+```{r states names and centroid for global map, message = FALSE, warning = FALSE, echo = params$display}
+# extracts a map of the States and recodes state labels to show the two-letter code rather than the full state name.
+
+# obtaining simple feature objects for states and finding centroids for label positioning
+states <- sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
+states <- cbind(states, st_coordinates(st_centroid(states)))
+
+# making table key for state 2-letter abbreviations
+# the vectors state.abb and state.name contains strings of all
+# US states and abbreviations
+state_abbr <- tibble(state.name = str_to_lower(state.name), state.abb) %>% 
+  left_join(tibble(ID = states$ID), ., by = c(ID = "state.name")) %>% 
+  mutate(state.abb = replace_na(state.abb, ""))
+
+# adding 2-letter codes to sf
+states$code <- state_abbr$state.abb
+```
+
+\newpage
+ 
+# Aim and setup
+ 
+For this second vignette, we want to test the anthropogenic character of jump events identified in the first vignette. Our working hypotheses are that (1) SLF hitchhike on roads, railroads, and regional planes, and thus, establish along major transport infrastructures, and (2) SLF get trapped and transported with materials and are dropped at their destination (international airports, intermodal platforms, mail carriers, gathering points, landscaping companies...). To test the significance of this pattern, we measure the distance between the location of jump events (SLF hereafter called 'jumpers') and each type of transport infrastructure. 
+
+Then:   
+
+- To determine whether these jumps are situated significantly closer than random to transport infrastructures, we compare the average value of this distance to a null distribution.  
+
+- To make sure that any significant result would not be due to surveys being conducted mostly close to transport infrastructures, we also calculate the distance to transport infrastructures for SLF established through diffusive spread (SLF hereafter called 'diffusers'), and for surveys that did not detect SLF (hereafter 'undetected'). We test the significance of the distance to transport infrastructures for these two categories using random distributions again.  
+
+- Finally, we test whether jumpers are found significantly closer to transport infrastructures than diffusers or undetected, to see if there is also a direct and significant difference between these categories.  
+
+  
+First load the dataset for the SLF data
+```{r load datasets, message = FALSE, warning = FALSE}
+
+# SLF data (in the folder SLF_datascience)
+# First, load the dataset that contains the location of each survey
+grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"))
+# Extract each point independently of the year it was sampled (for distance calculations)
+grid_data %<>% filter(bio_year != 2021) %>% select(latitude_rounded, longitude_rounded) %>%
+  distinct(latitude_rounded, longitude_rounded, .keep_all = T) 
+dim(grid_data) # 43,984 rows
+
+# Make it a shapefile to visualize the data
+grid_layer <- st_as_sf(x = grid_data, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F)
+st_crs(grid_layer)
+states <- st_transform(states, crs = "EPSG:4269")
+
+# Visualize the data
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = grid_layer, col = "blue") +
+    labs(x = "Longitude", y = "Latitude")
+
+# We want to remove individuals that are super far away (Oregon, Washington, Arizona, New Mexico, Missouri, Illinois)
+# Create a shapefile for the states we are interested in
+NE <- states %>% filter(ID %in% c("connecticut", "delaware", "district of columbia", "georgia",
+                            "indiana", "kentucky", "maryland", "massachusetts", "new hampshire",
+                            "new jersey", "new york", "north carolina", "ohio", "pennsylvania",
+                            "rhode island", "south carolina", "tennessee", "vermont", "virginia",
+                            "west virginia"))
+# NEbuff <- sf::st_buffer(NE, dist = 0) # This is because the map has self-intersections
+# slf_core <- st_intersection(grid_layer, NEbuff) # This causes problems because a few points are considered outside of the boundaries because of the rounding!
+
+# Try another way to filter out points that are very far
+slf_core <- grid_layer %>% filter(longitude_rounded > -90) 
+
+# Visualize the data
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+    geom_sf(data = NE, col = "blue") +
+  geom_sf(data = grid_layer, col = "red") +
+  geom_sf(data = slf_core, col = "blue") +
+      # coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+    labs(x = "Longitude", y = "Latitude")
+
+
+
+
+
+
+# Next load the dataset that contains all jumpers identified by sets of parameters
+jumpers <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
+
+# Identify the number of jumpers per set of parameters
+jumpers %>% group_by(Rarefied) %>% count()
+
+```
+
+Second, load the GIS shapefiles for the landscape data
+
+
+
+
+```{r load landscape features, message = FALSE, warning = FALSE}
+
+#Shapefiles for:
+
+## SLF dropped along the way:
+# Railroads (lines, buffer radius = 5 m)
+# These are railroads as defined by the USGS National Transportation Dataset. All lines have been merged and projected before buffer construction.
+rail <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Railroads/Railways_full_buffer5m.shp", quiet = T)
+
+# Roads (lines, buffer radius = 15 m)
+# This shapefile contains primary and secondary roads as defined by the US Census bureau. There is no information on traffic volume (AADT). All lines have been merged and projected before buffer construction.
+road <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Roads/Prisec_roads/road_buffer15m.shp", quiet = T)
+# st_write(road_buffer15m, here::here(file.path("exported-data", "road_buffer15m.shp", driver = "ESRI Shapefile")))
+
+
+## SLF dropped at destination:
+# through people transportation:
+
+# International + millitary airports (points, buffer radius = 1 000 m)
+# These are codes 4 and 5 for airport category per USGS National Transportation Dataset. Data initially contained several points per airport, one unique point has been kept to be used as the center of the buffer.
+airports_internat <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_datascience/GIS/airports_internat_millitary_buffer.shp", quiet = T)
+
+# Regional airports (points, buffer radius = 200 m)
+# These are codes 1 to 3 for airport category per USGS National Transportation Dataset. Data initially contained several points per airport, one unique point has been kept to be used as the center of the buffer.
+airports_regional <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_datascience/GIS/airports_regional_buffer.shp", quiet = T)
+
+# Through goods transportation:
+# Ports (points, buffer radius = 200 m)
+# These are ports as defined by the USGS ScienceBase-Catalog
+ports <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Ports/Ports_buffer.shp", quiet = T)
+
+
+# Visualize shapefiles
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = road, col = "blue") +
+      coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+```
+
+
+# 1. Correlation between variables: how far are airports and ports from railroads and roads?
+```{r check distance airports with railroads and roads}
+
+# Calculate the distances to transport infrastructures (from the data frame)
+airports_internat %<>% add_column(DistToRail = NA,
+                              DistToRoad = NA)
+airports_regional %<>% add_column(DistToRail = NA,
+                              DistToRoad = NA)
+ports %<>% add_column(DistToRail = NA,
+                      DistToRoad = NA)
+
+
+#Calculate their distance to transport infrastructures
+for (j in 1:length(airports_internat$DistToRail)){ 
+  print(j)
+  dist_rail <- st_distance(x = airports_internat[j,], y = rail)
+  airports_internat$DistToRail[j] <- min(dist_rail)
+  dist_road <- st_distance(x = airports_internat[j,], y = road)
+  airports_internat$DistToRoad[j] <- min(dist_road)
+}
+
+for (j in 1:length(airports_regional$DistToRail)){ 
+  print(j)
+  dist_rail <- st_distance(x = airports_regional[j,], y = rail)
+  airports_regional$DistToRail[j] <- min(dist_rail)
+  dist_road <- st_distance(x = airports_regional[j,], y = road)
+  airports_regional$DistToRoad[j] <- min(dist_road)
+}
+
+for (j in 1:length(ports$DistToRail)){ 
+  print(j)
+  dist_rail <- st_distance(x = ports[j,], y = rail)
+  ports$DistToRail[j] <- min(dist_rail)
+  dist_road <- st_distance(x = ports[j,], y = road)
+  ports$DistToRoad[j] <- min(dist_road)
+}
+
+
+# Results
+ggplot(data = )
+
+``` 
+
+# 2. Calculate distances of SLF to transport infrastructures
+
+## Calculate distances to transports
+
+Calculate the distances of each point to transport infrastructure (once and for all!)
+
+```{r distance of SLF to transport infrastructures, eval = FALSE}
+
+# Take one full dataset for grid data
+grid_data <- grid_data_full %>% 
+  select(-sectors) %>% 
+  filter(bio_year != 2021) %>% 
+  distinct(bio_year, latitude_rounded, longitude_rounded, .keep_all = T)
+
+# Create rows for distances
+grid_data %<>% add_column(DistToRail = NA,
+                          DistToRoad = NA,
+                          DistToIntAirport = NA,
+                          DistToRegAirport = NA,
+                          DistToPort = NA)
+
+
+# Create a shapefile 
+grid_layer <- st_as_sf(x = grid_data, coords = c("longitude_rounded", "latitude_rounded"), crs = 4326, remove = F)
+grid_proj <- st_transform(grid_layer, crs = st_crs(rail))
+
+#Calculate their distance to transport infrastructures
+for (j in 5509:length(grid_proj$DistToRail)){ 
+  # Print the row being considered
+  print(j)
+  
+  # Calculate distance to the closest railroad
+  dist_rail <- st_distance(x = grid_proj[j,], y = rail)
+  grid_proj$DistToRail[j] <- min(dist_rail)
+  
+  # Calculate distance to the closest major road
+  dist_road <- st_distance(x = grid_proj[j,], y = road)
+  grid_proj$DistToRoad[j] <- min(dist_road)
+  
+  # Calculate distance to the closest international/millitary airport
+  dist_intairport <- st_distance(x = grid_proj[j,], y = airports_internat)
+  grid_proj$DistToIntAirport[j] <- min(dist_intairport)
+  
+  # Calculate distance to the closest regional airport
+  dist_regairport <- st_distance(x = grid_proj[j,], y = airports_regional)
+  grid_proj$DistToRegAirport[j] <- min(dist_regairport)
+  
+  # Calculate distance to the closest port
+  dist_port <- st_distance(x = grid_proj[j,], y = ports)
+  grid_proj$DistToPort[j] <- min(dist_port)
+}
+
+
+# Save file
+st_geometry(grid_proj) <- NULL
+dist_transports <- grid_proj
+write.csv(grid_proj, "../exported-data/Distances_observed/grid_distances_transport.csv", row.names = F)
+```
+
+
+## Merge these distances with the full data frame
+```{r add distances to full data frame}
+dist_transports <- read.csv("../exported-data/Distances_observed/grid_distances_transport.csv")
+
+grid_data_full %<>% left_join(dist_transports)
+```
+
+
+
+
+\newpage
+
+# 3. Create datasets for jumpers/diffusers/negatives
+
+## Attribute points to jumpers, diffusers or undetected
+```{r choose which dataset you are testing}
+
+###################
+# SCENARIO 1: full dataset (multiple jumps per location)
+###################
+
+jumps %<>% add_column(Category = "Jumpers")
+grid <- grid_data_full %<>% mutate(Category_out = ifelse(Status == "Established", "Diffusers", 
+                                                ifelse(Status == "Present", "Present", "Negatives")))
+# Put jumpers into the grid data and complete with the rest
+grid %<>% left_join(jumps) %>% 
+  mutate(Category = ifelse(is.na(Category), Category_out, Category)) %>% 
+  select(-Category_out)
+
+# Verify we still have the right number of jumps
+dim(grid %>% filter(Category == "Jumpers"))[1] == dim(jumps)[1]
+
+# Order the variable (for plots)
+grid$Category <- factor(grid$Category, levels = c("Jumpers", "Diffusers", "Present", "Negatives"))
+
+###################
+# SCENARIO 2: rarefied dataset (one jump per location)
+###################
+
+jumps_rarefied <- jumpers %>% filter(Rarefied == TRUE) %>% 
+  select(bio_year, latitude_rounded, longitude_rounded, slf_established, DistToIntro, Status) %>% 
+  add_column(Category = "Jumpers")
+
+grid_rarefied <- grid_data_full %<>% mutate(Category_out = ifelse(Status == "Established", "Diffusers", 
+                                                ifelse(Status == "Present", "Present", "Negatives")))
+# Put jumpers into the grid data and complete with the rest
+grid_rarefied %<>% left_join(jumps_rarefied) %>% 
+  mutate(Category = ifelse(is.na(Category), Category_out, Category)) %>% 
+  select(-Category_out)
+
+# Verify we still have the right number of jumps
+dim(grid_rarefied %>% filter(Category == "Jumpers"))[1] == dim(jumps_rarefied)[1]
+
+# Order the variable (for plots)
+grid_rarefied$Category <- factor(grid_rarefied$Category, levels = c("Jumpers", "Diffusers", "Present", "Negatives"))
+
+```
+
+
+# 4. Check for differences in observed means between categories of SLF
+
+```{r distance of jumpers to transport infrastructures}
+
+grid %>% group_by(Category) %>% summarise(meanDistToRail = mean(DistToRail),
+                                          meanDistToRoad = mean(DistToRoad),
+                                          meanDistToPort = mean(DistToPort),
+                                          meanDistToIntAirport = mean(DistToIntAirport),
+                                          meanDistToRegAirport = mean(DistToRegAirport))
+```
+
+
+## Visual inspection
+
+We have a first look at differences in distances to transport infrastructures between categories (Figure 1). Note that the y axis is truncated to show more clearly the boxes. Refer to the previous section to get the quartiles and maximum values of the variables. 
+Jumpers seem to be closer to rail and roads than the other two categories, but there is no visible difference regarding the distance to airports. Diffusers are intermediate between jumpers and undetected for roads and railroads. 
+
+```{r plot histogram of distances between jumpers, diffusers, undetected, fig.height=5, fig.width = 6, fig.cap="Distance of jumpers, diffusers and non-detections to railroads (top), roads (middle), and airports (bottom). The y axis is truncated to better show the boxes. Refer to section 1 for variables summary."}
+
+###################
+# SCENARIO 1
+###################
+# Plot distances 
+rail_bp <- ggplot(grid_S16GS15, aes(y = DistToRail, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 30000)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest railroad (m)")
+
+road_bp <- ggplot(grid_S16GS15, aes(y = DistToRoad, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 7500)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest major road (m)")
+
+airport_bp <- ggplot(grid_S16GS15, aes(y = DistToAirport, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 30000)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest airport (m)")
+
+transport_bp <- grid.arrange(rail_bp, road_bp, airport_bp, nrow = 3)
+
+# ggsave("../figures/vignette_transports/transport_bp.jpg", transport_bp, width = 6, height = 6)
+
+
+###################
+# SCENARIO 2
+###################
+# Plot distances 
+rail_bp <- ggplot(grid_S8GS15, aes(y = DistToRail, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 30000)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest railroad (m)")
+
+road_bp <- ggplot(grid_S8GS15, aes(y = DistToRoad, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 7500)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest major road (m)")
+
+airport_bp <- ggplot(grid_S8GS15, aes(y = DistToAirport, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 30000)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest airport (m)")
+
+transport_bp <- grid.arrange(rail_bp, road_bp, airport_bp, nrow = 3)
+
+# ggsave("../figures/vignette_transports/transport_bp_DP12GS15reduced.jpg", transport_bp, width = 6, height = 6)
+
+
+
+
+###################
+# SCENARIO 3
+###################
+# Plot distances 
+rail_bp <- ggplot(grid_S20GS10, aes(y = DistToRail, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 30000)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest railroad (m)")
+
+road_bp <- ggplot(grid_S20GS10, aes(y = DistToRoad, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 7500)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest major road (m)")
+
+airport_bp <- ggplot(grid_S20GS10, aes(y = DistToAirport, x = Category)) + 
+  geom_boxplot() +
+  coord_cartesian(ylim=c(0, 30000)) +
+  theme_classic() +
+  labs(x=NULL) +
+  ylab("Nearest airport (m)")
+
+transport_bp <- grid.arrange(rail_bp, road_bp, airport_bp, nrow = 3)
+
+# ggsave("../figures/vignette_transports/transport_bp_DP20GS10reduced.jpg", transport_bp, width = 6, height = 6)
+```
+
+
+## Statistical test of the difference of the means between jumpers, diffusers and non-detections
+
+The distance to the nearest railroad is not normally distributed for each group, and the variance is not equal between groups. There is also a large difference in sample sizes (75, 5000 and 40000). We use a Matt-Whitney test to test for the stochastic dominance of a group over another one. 
+
+``` {r comparison distances for jumpers, diffusers, negatives}
+
+grid <- grid_S16GS15 %>% filter(Category %in% c("Jumpers", "Diffusers", "Negatives"))
+
+# Test heteroscedasticity
+bartlett.test(DistToRoad ~ Category, data = grid)
+# Bartlett's K-squared = 60395, df = 2, p-value < 2.2e-16
+
+bartlett.test(DistToRail ~ Category, data = grid)
+# Bartlett's K-squared = 48929, df = 2, p-value < 2.2e-16
+
+bartlett.test(DistToAirport ~ Category, data = grid)
+# Bartlett's K-squared = 47251, df = 2, p-value < 2.2e-16
+
+
+# Test symmetry of the distribution and same shape in all groups
+ggplot(grid, aes(x = DistToRoad)) + 
+  geom_histogram() +
+  facet_wrap(~Category) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_classic() 
+
+library(RVAideMemoire)
+# Test of the difference between the medians
+mood.medtest(DistToAirport ~ Category, data = grid)
+# X-squared = 325.65, df = 2, p-value < 2.2e-16
+pairwise.mood.medtest(grid$DistToAirport, grid$Category)
+#           Jumpers Diffusers
+# Diffusers 0.038   -             
+# Negatives 0.961   <2e-16
+
+mood.medtest(DistToRoad ~ Category, data = grid)
+# X-squared = 29.955, df = 2, p-value = 3.128e-07
+pairwise.mood.medtest(grid$DistToRoad, grid$Category)
+          # Jumpers Diffusers 
+# Diffusers 6.1e-05 -             
+# Negatives 1.2e-05 0.026
+
+mood.medtest(DistToRail ~ Category, data = grid)
+# X-squared = 617.09, df = 2, p-value < 2.2e-16
+pairwise.mood.medtest(grid$DistToRail, grid$Category)
+          # Jumpers Diffusers 
+# Diffusers 9.8e-11 -               
+# Negatives 1.5e-15 < 2e-16
+
+```
+
+
+All statistical tests on the differences of the means are significant at p = 0.05, except the difference in distance to airports between jumpers and diffusers. It means that jumpers are situated closer to rail and roads compared to diffusers and non-detections, and closer to airports compared to non-detections. Diffusers are situated closer to all transport infrastructures compared to non-detections.
+
+
+\newpage
+
+
+
+# 5. Generate random dispersal distribution
+
+The idea is to generate a distribution of distances to transport infrastructures under the null hypothesis that SLF disperse randomly in the landscape. If a high number of random distributions are generated, we obtain the distribution of random dispersal distances to transports. The comparison of the random distribution and the observed average value gives the probability that the observed value is random.  
+
+Here, we generate 9,999 random datasets of distances to transport infrastructure. If the average value of the observed data is comprised within the simulated random values, it means that the pattern could be found by chance, and the distance between observed points and transport infrastructures is not significant.
+Clearly, it consists in: (1) generating a dataset of the same number of points as in the observed data, randomly over the same area (here, disk portions), (2) for each random point, calculating the distance to transport infrastructures, (3) taking the average distance to each transport infrastructure for the dataset, (4) redoing the same cycle again for a total of 9,999 simulated random datasets.
+
+Note: the actual code was run on the HPC, parallelized 10 times to obtain 10,000 simulations.
+
+
+## H1: Random distribution of jumpers
+
+We begin with the generation of random distributions of jumpers to the three transport types: roads, railroads and airports.
+This simulation is very long and has been done on the HPC. Here, just one dataset is simulated to show an example of a map of random points.
+
+```{r sample random points, eval = FALSE}
+
+#Calculate the limits of the grid = MINIMUM CONVEX POLYGON around the detections in grid_data_full
+slfEstab <- grid_proj %>% filter(Status == "Established", bio_year != 2021)
+
+# Map slfPresent
+p <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") + 
+    # coord_sf(xlim = c(-82, -70), ylim = c(36.5, 44), expand = FALSE) +
+  coord_sf(xlim = c(-75, -73), ylim = c(40.2, 41.2), expand = FALSE) +
+  # geom_point(data = slfEstab,
+            # aes(x = longitude_rounded, y = latitude_rounded),
+            # shape = 19, size = 1, col = "blue") +
+    geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+  
+p  
+
+# Find the convex hull of the points being plotted
+hull <- slfEstab %>% slice(chull(longitude_rounded, latitude_rounded))
+
+p + geom_polygon(data = hull, aes(x = longitude_rounded, y = latitude_rounded), alpha = 0.5)
+
+
+maxlat <- max(jumpers$latitude_rounded)
+minlat <- min(jumpers$latitude_rounded)
+maxlong <- max(jumpers$longitude_rounded)  
+minlong <- min(jumpers$longitude_rounded)
+
+table_maxcoord <- data.frame(Lat = c(minlat, minlat, maxlat, maxlat),
+                             Long = c(minlong, maxlong, maxlong, minlong))
+
+p + geom_polygon(data = hull, aes(x = longitude_rounded, y = latitude_rounded), alpha = 0.5, fill = "yellow") +
+  geom_polygon(data = table_maxcoord, aes(x = Long, y = Lat), 
+                 alpha = 0.5)
+
+#Calculate the number of points wanted
+table(jumpers$params)
+
+#Calculate all potential coordinates
+Seqlat <- seq(from = minlat, to = maxlat, by = 1/111)
+Seqlong <- seq(from = minlong, to = maxlong, by = 1/85)
+Coordinates <- expand.grid(latitude = Seqlat, longitude = Seqlong)
+
+#Keep only those that are on land! SLF can't swim!
+Coordinates <- st_as_sf(x = Coordinates, coords = c("longitude", "latitude"), crs = 4269, remove = F)
+Coordinates <- st_transform(Coordinates, crs = 4269)
+states <- sf::st_as_sf(maps::map("state", plot = F, fill = T))
+states <- st_make_valid(states)
+Coordinates_land <- st_intersection(Coordinates, states)
+
+# Make the chull a sf layer
+st_as_sf(hull, coords = c("longitude_rounded", "latitude_rounded"), crs = 4269)
+# Keep only those that are in the minimum convex polygon
+Coordinates_land_chull <- st_intersection(Coordinates_land, chull)
+
+
+for (i in 1:1){
+  #Generate a set of coordinates
+  print(i)
+  
+  Random_coordinates <- Coordinates_land[sample(nrow(Coordinates_land), size = 326, replace = F),]
+  
+  # Calculate distances for each point
+  random <- Random_coordinates %>% add_column(DistToAirport = NA,
+                                              DistToRail = NA,
+                                              DistToRoad = NA,
+                                              Simulation = NA)
+  random_layer <- st_as_sf(x = random, coords = c("Longitude", "Latitude"), crs = 4269)
+  random_proj <- st_transform(random_layer, crs = st_crs(rail) )
+  
+  
+  # for (j in 1:length(random_proj$DistToAirport)){ #Calculate their distance to transport infrastructures
+  #   
+  #   dist_airport <- st_distance(x = random_proj[j,], y = airports)
+  #   random_proj$DistToAirport[j] <- min(dist_airport)
+  #   dist_rail <- st_distance(x = random_proj[j,], y = rail)
+  #   random_proj$DistToRail[j] <- min(dist_rail)
+  #   dist_road <- st_distance(x = random_proj[j,], y = road)
+  #   random_proj$DistToRoad[j] <- min(dist_road)
+  #   random_proj$Simulation[j] <- i
+  # }
+  
+  #Keep the table with the simulation number
+  if (i == 1){
+    Simulations <- random_proj
+  } else {
+    Simulations <- bind_rows(Simulations, random_proj)
+  }
+  
+} 
+
+st_geometry(Simulations) <- NULL
+# write.csv(Simulations, "./R/Simulations.csv", row.names = F)
+
+```
+
+
+
+```{r map of random points for jumpers, fig.width= 6, fig.height=7, eval = FALSE}
+# Check on the first randomly generated dataset that the points location corresponds to the expectation in each disk portion (Figure 2).
+# extracts a map of the States and recodes state labels to show the two-letter code rather than the full state name.
+
+# obtaining simple feature objects for states and finding centroids for label positioning
+states <- sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
+states <- cbind(states, st_coordinates(st_centroid(states)))
+
+# making table key for state 2-letter abbreviations
+# the vectors state.abb and state.name contains strings of all
+# US states and abbreviations
+state_abbr <- tibble(state.name = str_to_lower(state.name), state.abb) %>% 
+  left_join(tibble(ID = states$ID), ., by = c(ID = "state.name")) %>% 
+  mutate(state.abb = replace_na(state.abb, ""))
+
+# adding 2-letter codes to sf
+states$code <- state_abbr$state.abb
+
+# All possible coordinates (intersection of land and coordinates)
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") + 
+    coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+  geom_point(data = Coordinates_land,
+            aes(x = longitude, y = latitude),
+            shape = 19, size = 0.01, col = "blue") +
+    geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+# Example of random coordinates
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") + 
+    coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+  geom_point(data = Simulations[sample(nrow(Simulations), size = 129, replace = FALSE),],
+            aes(x = longitude, y = latitude),
+            shape = 19, size = 1, col = "blue") +
+    geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+# Actual jumps
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") + 
+    coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE) +
+  geom_point(data = jumpers,
+            aes(x = longitude_rounded, y = latitude_rounded),
+            shape = 19, size = 1, col = "red") +
+    geom_text(data = states, aes(X, Y, label = code), size = 4.5) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+```
+
+
+### Data prep 
+```{r prep data frame simulated data for jumpers}
+# Prepare the data frame containing the simulated data from the HPC
+
+
+### FILE PREPARATION (326 samples x 10000 sim)
+# Merge all the files containing the simulated data
+files <- list.files(path = "C:/Users/labuser/Documents/Postdoc_SLF/SLF_datascience/exported-data/Distances_random distrib/326_jumpers/", 
+           pattern = NULL, all.files = FALSE,
+           full.names = T, recursive = FALSE,
+           ignore.case = FALSE, include.dirs = FALSE, no.. = FALSE)
+
+# Add all the high risk locations in a single table
+Random_jumpers <- read_csv(files[1])
+Random_jumpers$Set = files[1]
+
+for (f in files[-1]) {
+file <- read_csv(f)
+file$Set = f
+Random_jumpers <- rbind(Random_jumpers, file)
+} 
+
+Random_jumpers %<>% select(-geometry) %>% 
+  distinct(latitude, longitude, Simulation, Set, .keep_all=T) %>% 
+  mutate(Set = gsub("C:/Users/labuser/Documents/Postdoc_SLF/SLF_datascience/exported-data/Distances_random distrib/326_jumpers/Simulations", "", Set))
+
+
+## Get the mean distances of n simulated jumpers, for the 10,000 simulations
+#First create a code for each simulation and a new dataframe to store the subsamples
+Random_jumpers %<>% mutate(Code = paste0(Simulation, Set)) 
+
+Random_jumpers_subsamples <- data.frame(NULL)
+
+#Subsample the right number of jumps, depending on the scenario
+for (set in unique(as.factor(Random_jumpers$Code))){
+  print(set)
+  random_dataset <- Random_jumpers %>% filter(Code == set)
+  random_subsample <- random_dataset[sample(nrow(random_dataset), size = dim(jumpers_DP20GS10)[1], replace = FALSE),]
+  Random_jumpers_subsamples <- bind_rows(Random_jumpers_subsamples, random_subsample)
+}
+
+#Calculate the mean distance per simulation
+Random_jumpers_subsamples %<>% group_by(Code) %>% 
+  summarise(MeanDistToRail = mean(DistToRail),
+            MeanDistToRoad = mean(DistToRoad),
+            MeanDistToAirport = mean(DistToAirport))
+  
+#Take the first 10,000 averages (the rest was just in case)
+Random_jumpers_subsamples <- Random_jumpers_subsamples[1:10000,]
+
+write.csv(Random_jumpers_subsamples, "../exported-data/Distances_random distrib/Random_jumpers_DP20GS10.csv")
+Random_jumpers_subsamples <- read_csv("../exported-data/Distances_random distrib/Random_jumpers_DP20GS10.csv")
+```
+
+
+### Visualize results
+```{r visualize bootstrap results, fig.height = 5, fig.width = 6, fig.cap = "Comparison of the distance of jumpers to transports to a random distribution"}
+
+# Calculate the 2.5% and 97.5% limits of the simulated data (p = 0.05)
+road.quant <- quantile(Random_jumpers_subsamples$MeanDistToRoad,c(.025,.975))
+rail.quant <- quantile(Random_jumpers_subsamples$MeanDistToRail,c(.025,.975))
+airport.quant <- quantile(Random_jumpers_subsamples$MeanDistToAirport,c(.025,.975))
+
+# Calculate the p-value of the bootstrap
+proad = sum(Random_jumpers_subsamples$MeanDistToRoad < mean(jumpers$DistToRoad)) / 10000
+prail = sum(Random_jumpers_subsamples$MeanDistToRail < mean(jumpers$DistToRail)) / 10000
+pairport = sum(Random_jumpers_subsamples$MeanDistToAirport < mean(jumpers$DistToAirport)) / 10000
+
+
+# Histogram of the average distance to major roads based on 10,000 simulations + average from real data
+road_bs <- ggplot(data = Random_jumpers_subsamples, aes(x =  MeanDistToRoad)) +
+  geom_histogram(aes(x =  MeanDistToRoad/1000), binwidth = 0.1, col = "black") +
+  geom_vline(xintercept = road.quant[1]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = road.quant[2]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = mean(jumpers$DistToRoad)/1000, size = 1, col = "red") +
+  xlab("") +
+  ylab("") +
+  coord_cartesian(xlim = c(0, 27)) +
+  ggtitle(paste0("Distance to the nearest... \nMajor road, p = ", proad)) +
+  theme_classic()
+
+#Same for railways
+rail_bs <- ggplot(data = Random_jumpers_subsamples, aes(x =  MeanDistToRail)) +
+  geom_histogram(aes(x =  MeanDistToRail/1000), binwidth= 0.1, col = "black") +
+  geom_vline(xintercept = rail.quant[1]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = rail.quant[2]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = mean(jumpers$DistToRail)/1000, size = 1, col = "red") +
+  xlab("") +
+  ylab("Number of simulations") +
+  coord_cartesian(xlim = c(0, 27)) + 
+  ggtitle(paste0("Railway, p = ", prail)) +
+  theme_classic()
+
+
+# Same for airports
+airport_bs <- ggplot(data = Random_jumpers_subsamples, aes(x =  MeanDistToAirport)) +
+  geom_histogram(aes(x =  MeanDistToAirport/1000), binwidth= 0.1, col = "black") +
+  geom_vline(xintercept = airport.quant[1]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = airport.quant[2]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = mean(jumpers$DistToAirport)/1000, size = 1, col = "red") +
+  xlab("Distance (km)") +
+  ylab("") +
+  coord_cartesian(xlim = c(0, 27)) + 
+  ggtitle(paste0("Airport, p = ", pairport)) +
+  theme_classic()
+
+# Visualize the three graphs
+transport_bs <- grid.arrange(road_bs, rail_bs, airport_bs, nrow = 3)
+
+# Save the compound graph
+transport_bs <- arrangeGrob(road_bs, rail_bs, airport_bs, nrow = 3)
+ggsave("../figures/vignette_transports/transport_bs_DP20GS10full.jpg", transport_bs, width = 200, height = 150, unit = "mm")
+
+```
+
+We can visualize the results on Figure 2. The histogram represents the distribution of distances under the null hypothesis of random dispersal of jumpers, for each type of transport. The black vertical lines indicate the significance limits. An observed value situated outside of these vertical lines leads to the rejection of the null hypothesis. The red line indicates the average distance to transports observed in our dataset.  
+For all three types of transports, the observed location of jumpers is significantly closer to transports than random.  
+
+
+## Comparison with diffusive spread and non-detections
+
+The generation of 9,999 simulated datasets is much longer for diffusive spread and non-detections because these datasets are much bigger. As a first approach, we bootstrap the diffusers and undetected datasets, to obtain average distances based on datasets with the same number of surveys as of jumpers. We sample 75 points in the diffusers and undetected datasets (with the same share between disk portions as the jumpers), take the average distance to each transport, and repeat 9,999 times to obtain an average value that can be compared to the random distribution that we already have, before leading time-consuming simulations.
+
+```{r Subsample the name number of diffusers, undetected and total as of jumpers}
+
+samplesize = dim(jumpers)[1]
+Diffusers_bootstrap <- data.frame(MeanDistToRoad = rep(NA, 10000),
+                                  MeanDistToRail = rep(NA, 10000),
+                                  MeanDistToAirport = rep(NA, 10000))
+Negatives_bootstrap <- data.frame(MeanDistToRoad = rep(NA, 10000),
+                                  MeanDistToRail = rep(NA, 10000),
+                                  MeanDistToAirport = rep(NA, 10000))
+  
+for (k in 1:10000){
+  #Generate one dataset
+  print(k)
+  #Sample diffusers
+  Diffusers_sample <- diffusers[sample(nrow(diffusers), size = samplesize, replace = FALSE),]
+  Diffusers_bootstrap$MeanDistToRail[k] = mean(Diffusers_sample$DistToRail)
+  Diffusers_bootstrap$MeanDistToRoad[k] = mean(Diffusers_sample$DistToRoad)
+  Diffusers_bootstrap$MeanDistToAirport[k] = mean(Diffusers_sample$DistToAirport)
+    
+  #Sample each portion of negatives
+  Negatives_sample <- negatives[sample(nrow(negatives), size = samplesize, replace = FALSE),]
+  Negatives_bootstrap$MeanDistToRail[k] = mean(Negatives_sample$DistToRail)
+  Negatives_bootstrap$MeanDistToRoad[k] = mean(Negatives_sample$DistToRoad)
+  Negatives_bootstrap$MeanDistToAirport[k] = mean(Negatives_sample$DistToAirport)
+}
+
+```
+
+
+```{r visualize bootstrap results with diffusers and non-detections, fig.height = 5, fig.width = 6, fig.cap="Comparison of the distance of jumpers, diffusers and non-detections to transports to a random distribution"}
+
+# Calculate the 2.5% and 97.5% limits of the simulated data (p = 0.05)
+road.quant <- quantile(Random_jumpers_subsamples$MeanDistToRoad,c(.025,.975))
+rail.quant <- quantile(Random_jumpers_subsamples$MeanDistToRail,c(.025,.975))
+airport.quant <- quantile(Random_jumpers_subsamples$MeanDistToAirport,c(.025,.975))
+
+# Calculate the p-value of the bootstrap
+proad = sum(Random_jumpers_subsamples$MeanDistToRoad < mean(jumpers$DistToRoad)) / 10000
+prail = sum(Random_jumpers_subsamples$MeanDistToRail < mean(jumpers$DistToRail)) / 10000
+pairport = sum(Random_jumpers_subsamples$MeanDistToAirport < mean(jumpers$DistToAirport)) / 10000
+
+
+# Histogram of the average distance to major roads based on 10,000 simulations + average from real data
+road_bs_total <- ggplot(data = Random_jumpers_subsamples, aes(x =  MeanDistToRoad)) +
+  geom_histogram(aes(x =  MeanDistToRoad/1000), binwidth = 0.1, col = "black") +
+  geom_vline(xintercept = road.quant[1]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = road.quant[2]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = mean(jumpers$DistToRoad)/1000, size = 1, col = "red") +
+  geom_vline(xintercept = mean(Diffusers_bootstrap$MeanDistToRoad)/1000, size = 1, col = "blue") +
+  geom_vline(xintercept = mean(Negatives_bootstrap$MeanDistToRoad)/1000, size = 1, col = "green") +
+  xlab("") +
+  ylab("") +
+  coord_cartesian(xlim = c(0, 27)) +
+  ggtitle(paste0("Distance to the nearest... \nMajor road")) +
+  theme_classic()
+
+#Same for railways
+rail_bs_total <- ggplot(data = Random_jumpers_subsamples, aes(x =  MeanDistToRail)) +
+  geom_histogram(aes(x =  MeanDistToRail/1000), binwidth= 0.1, col = "black") +
+  geom_vline(xintercept = rail.quant[1]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = rail.quant[2]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = mean(jumpers$DistToRail)/1000, size = 1, col = "red") +
+  geom_vline(xintercept = mean(Diffusers_bootstrap$MeanDistToRail)/1000, size = 1, col = "blue") +
+  geom_vline(xintercept = mean(Negatives_bootstrap$MeanDistToRail)/1000, size = 1, col = "green") +
+  xlab("") +
+  ylab("Number of simulations") +
+  coord_cartesian(xlim = c(0, 27)) + 
+  ggtitle(paste0("Railway")) +
+  theme_classic()
+
+# Same for airports
+airport_bs_total <- ggplot(data = Random_jumpers_subsamples, aes(x =  MeanDistToAirport)) +
+  geom_histogram(aes(x =  MeanDistToAirport/1000), binwidth= 0.1, col = "black") +
+  geom_vline(xintercept = airport.quant[1]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = airport.quant[2]/1000, size = 1, col = "black") +
+  geom_vline(xintercept = mean(jumpers$DistToAirport)/1000, size = 1, col = "red") +
+  geom_vline(xintercept = mean(Diffusers_bootstrap$MeanDistToAirport)/1000, size = 1, col = "blue") +
+  geom_vline(xintercept = mean(Negatives_bootstrap$MeanDistToAirport)/1000, size = 1, col = "green") +
+  xlab("Distance (km)") +
+  ylab("") +
+  coord_cartesian(xlim = c(0, 27)) + 
+  ggtitle(paste0("Airport")) +
+  theme_classic()
+
+
+# Visualize the three graphs
+transport_bs_total <- grid.arrange(road_bs_total, rail_bs_total, airport_bs_total, nrow = 3)
+
+# Save the compound graph
+transport_bs_total <- arrangeGrob(road_bs_total, rail_bs_total, airport_bs_total, nrow = 3)
+ggsave("../figures/vignette_transports/transport_bs_total_DP20GS10full.jpg", transport_bs_total, width = 200, height = 150, unit = "mm")
+
+```
+
+
+Figure 3 shows the significance of the observed distances of diffusers (blue line), non-detections (green line), and all samples confounded (yellow line) to transport infrastructures, compared to a random distribution. The results are similar for all transport types: diffusers are significantly closer to transports than random, but not as much as jumpers, and non-detections and total samples are significantly further from transports than random.  
+
+
+
+```{r visualize bootstrap results with diffusers and non-detections HISTOGRAMS, fig.height = 5, fig.width = 6, fig.cap="Comparison of the histograms of distance of jumpers, diffusers and non-detections to transports to a random distribution"}
+
+# Calculate the 2.5% and 97.5% limits of the simulated data (p = 0.05)
+road.quant <- quantile(Random_jumpers_subsamples$MeanDistToRoad,c(.025,.975))
+rail.quant <- quantile(Random_jumpers_subsamples$MeanDistToRail,c(.025,.975))
+airport.quant <- quantile(Random_jumpers_subsamples$MeanDistToAirport,c(.025,.975))
+
+# Calculate the p-value of the bootstrap
+proad = sum(Random_jumpers_subsamples$MeanDistToRoad < mean(jumpers$DistToRoad)) / 10000
+prail = sum(Random_jumpers_subsamples$MeanDistToRail < mean(jumpers$DistToRail)) / 10000
+pairport = sum(Random_jumpers_subsamples$MeanDistToAirport < mean(jumpers$DistToAirport)) / 10000
+
+
+# Histogram of the average distance to major roads based on 10,000 simulations + average from real data
+road_bs_total <- ggplot(data = Random_jumpers_subsamples, aes(x =  MeanDistToRoad)) +
+  geom_histogram(aes(x =  MeanDistToRoad/1000), binwidth = 0.1, col = "black") +
+  geom_vline(xintercept = mean(jumpers$DistToRoad)/1000, size = 1, col = "red") +
+  # geom_histogram(data = jumpers, aes(x = DistToRoad/1000), binwidth = 0.1, col = "red") +
+  geom_histogram(aes(x = Diffusers_bootstrap$MeanDistToRoad/1000), binwidth = 0.1, col = "blue") +
+  geom_histogram(aes(x = Negatives_bootstrap$MeanDistToRoad/1000), binwidth = 0.1, col = "green") +
+  xlab("") +
+  ylab("") +
+  coord_cartesian(xlim = c(0, 27)) +
+  ggtitle(paste0("Distance to the nearest... \nMajor road")) +
+  theme_classic()
+
+#Same for railways
+rail_bs_total <- ggplot(data = Random_jumpers_subsamples, aes(x =  MeanDistToRail)) +
+  geom_histogram(aes(x =  MeanDistToRail/1000), binwidth= 0.1, col = "black") +
+  geom_vline(xintercept = mean(jumpers$DistToRail)/1000, size = 1, col = "red") +
+  # geom_histogram(data = jumpers, aes(x = DistToRail/1000), binwidth = 0.1, col = "red") +
+  geom_histogram(aes(x = Diffusers_bootstrap$MeanDistToRail/1000), binwidth = 0.1, col = "blue") +
+  geom_histogram(aes(x = Negatives_bootstrap$MeanDistToRail/1000), binwidth = 0.1, col = "green") +
+  xlab("") +
+  ylab("Number of simulations") +
+  coord_cartesian(xlim = c(0, 27)) + 
+  ggtitle(paste0("Railway")) +
+  theme_classic()
+
+# Same for airports
+airport_bs_total <- ggplot(data = Random_jumpers_subsamples, aes(x =  MeanDistToAirport)) +
+  geom_histogram(aes(x =  MeanDistToAirport/1000), binwidth= 0.1, col = "black") +
+  # geom_histogram(data = jumpers, aes(x = DistToAirport/1000), binwidth = 0.1, col = "red") +
+  geom_vline(xintercept = mean(jumpers$DistToAirport)/1000, size = 1, col = "red") +
+  geom_histogram(aes(x = Diffusers_bootstrap$MeanDistToAirport/1000), binwidth = 0.1, col = "blue") +
+  geom_histogram(aes(x = Negatives_bootstrap$MeanDistToAirport/1000), binwidth = 0.1, col = "green") +
+  xlab("Distance (km)") +
+  ylab("") +
+  coord_cartesian(xlim = c(0, 27)) + 
+  ggtitle(paste0("Airport")) +
+  theme_classic()
+
+
+# Visualize the three graphs
+transport_bs_total_hist <- grid.arrange(road_bs_total, rail_bs_total, airport_bs_total, nrow = 3)
+
+# Save the compound graph
+transport_bs_total_hist <- arrangeGrob(road_bs_total, rail_bs_total, airport_bs_total, nrow = 3)
+ggsave("../figures/vignette_transports/transport_bs_total_hist.jpg", transport_bs_total_hist, width = 200, height = 150, unit = "mm")
+
+```
+
+
+\newpage
+
+# 6. Results and conclusion
+
+In this vignette, we discovered that:  
+
+(0) The 40,988 surveys of the dataset that confirmed either the presence of an established SLF population or the absence of SLF have been conducted on average 13, 17 and 19 km away from major roads, railroads and airports, respectively. It is much further than random. *==> The survey method is not biased towards transport infrastructures*
+
+(1) SLF populations, both from jump events and diffusive spread, are not located randomly, but very significantly close to transport infrastructures: roads, rail and airports. The difference to the random distribution is the highest for railroads, then roads, then airports.  *==> SLF presence is tightly linked to transport infrastructures*
+
+(2) Jump events are situated even closer to transport infrastructures than the other SLF populations, on average 444, 659 and 6,566 m away from major roads, rails and airports, respectively. *==> the establishment of new satellite populations is even more linked to transport infrastructures than diffusive spread*
+
+(3) On the other hand, locations where SLF are not found are situated further than random from transport infrastructures. *==> SLF are unlikely to establish far from transport infrastructures*
+
+
+Given these results, it is very likely that there is a causal relationship between SLF presence and transport infrastructures. SLF are likely transported by vehicles or their content, either as egg masses laid onto random materials, or at another life stage that crawls or flies on vehicles.
+It is likely that some transports are more involved in SLF dispersal than others. Correlation is not causation: the proximity to some transports might appear significantly related to SLF presence only because these transports are found in overall highly connected areas. This might be the case for airports, because the correlation between SLF and airports appears looser than with roads or rails. Airports are typically in areas well connected by roads and rails. More, it is assumed that adult SLF cannot survive a flight.
+
+
+In the next vignette, we are going to apply this knowledge to the spatial analysis of the northeastern US, by looking at areas considered as high risk of invasion (their proximity to SLF populations and to transport infrastructures), and projecting areas likely to be invaded sooner or later.
+
+
