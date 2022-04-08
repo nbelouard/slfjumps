@@ -1,11 +1,6 @@
 # Description
 
-This project explores the complicated relationship between the great city of Pawnee, Indiana, and the population of raccoons inhabiting it. According to Ron Swanson, in Pawnee raccoons "are active 24/7" and if they are not removed from the Christmas village, "they'll hunt the children for sport".
-
-More information on the issue can be found here: https://www.youtube.com/watch?v=cUcjn1CuRZI
-And here: https://www.reddit.com/r/FanTheories/comments/8naibb/parks_and_rec_why_pawnee_is_overrun_with_raccoons/
-
-On a less serious note, this part of a project is meant to provide a collaborator with all the information required to download and install the package, and reproduce the analyses contained in it. The following paragraphs help with that.
+The slfjumps package identifies and analyzes the location of jump events in the invasion of the spotted lanternfly (Lycorma delicatula, hereafter SLF) in the United States. The SLF was first discovered in Berks County, PA, in 2014. 
 
 ## How to clone this project locally
 
