@@ -4,13 +4,13 @@
 \alias{group_jumps}
 \title{Attribute groups to jumps}
 \usage{
-group_jumps(Jumps_oneparam, gap_size = 15)
+group_jumps(jumps, gap_size = 15)
 }
 \arguments{
-\item{Jumps_oneparam}{A dataset to be processed}
-
 \item{gap_size}{Distance between the invasion front and the positive point
 necessary for it to be considered a jump, in kilometers (default: 15)}
+
+\item{Jumps_oneparam}{A dataset to be processed}
 }
 \value{
 The same table as \code{dataset} with an additional column named

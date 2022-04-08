@@ -55,7 +55,11 @@ rarefy_groups <- function(Jump_groups) {
   
   # Keep the closest point
   st_geometry(Jumpers_proj) <- NULL
-  Jumpers_unique <- Jumpers_proj %>% group_by(Group) %>% slice(which.min(DistToCentroid)) %>% ungroup()
+  Jumpers_unique <- Jumpers_proj %>% 
+    group_by(Group) %>% 
+    slice(which.min(DistToCentroid)) %>% 
+    ungroup() %>% 
+    select(-DistToCentroid)
   
   return(Jumpers_unique)
 }

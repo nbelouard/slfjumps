@@ -1,18 +1,94 @@
 ---
-title: "0151_Figures_jump_list"
-author: "Nadege Belouard"
-date: "3/30/2022"
-output: html_document
+title: "Figures for the manuscript"
+author: 
+- Nadege Belouard^[Temple University, nadege.belouard@temple.edu]
+- Sebastiona De Bona^[Temple University, seba.debona@temple.edu]
+- Jocelyn E. Behm^[Temple University, jebehm@temple.edu]
+- Matthew R. Helmus^[Temple University, mrhelmus@temple.edu]
+date: "4/8/2021"
+output:
+  pdf_document:
+    toc: TRUE
+    toc_depth: 2
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+params:
+  display: FALSE
+  run: TRUE
+  loadfiles: FALSE
+  savefiles: TRUE
+editor_options: 
+  chunk_output_type: console
 ---
-## Run the program (with one particular set of parameters)
 
-```{r run the program, echo = params$display, eval = params$run}
+#1. Setup
 
+```{r setup for rendering, include = F, messages = F, warning = F}
+# First we set parameters and install all the necessary packages
+knitr::opts_chunk$set(dpi = 300, warning = FALSE, message = FALSE, echo = FALSE)
+
+# attaching necessary packages
+library(tidyverse)
+library(magrittr)
+library(sf)
+library(maps)
+library(DescTools)
+library(reshape2)
+library(ggplot2)
+library(here)
+library(slfjumps)
+library(leaflet)
+
+sf::sf_use_s2(FALSE)
+```
+
+## States map
+```{r states names and centroid for global map, message = FALSE, warning = FALSE, echo = params$display}
+# extracts a map of the States and recodes state labels to show the two-letter code rather than the full state name.
+
+# obtaining simple feature objects for states and finding centroids for label positioning
+states <- sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
+# sf::st_as_sf(maps::map("county", plot = TRUE, fill = FALSE))
+states <- cbind(states, st_coordinates(st_centroid(states)))
+
+# making table key for state 2-letter abbreviations
+# the vectors state.abb and state.name contains strings of all
+# US states and abbreviations
+state_abbr <- tibble(state.name = str_to_lower(state.name), state.abb) %>%
+  left_join(tibble(ID = states$ID), ., by = c(ID = "state.name")) %>%
+  mutate(state.abb = replace_na(state.abb, ""))
+
+# adding 2-letter codes to sf
+states$code <- state_abbr$state.abb
+
+ggplot() +
+    geom_sf(data = states, alpha = 0) +
+  geom_text(data = states, aes(X, Y, label = code), size = 2) 
+
+```
+
+
+## Load files
+```{r load datasets for analysis}
+Jumps <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
+Jumps %<>% mutate(Rarefied = ifelse(is.na(Rarefied), "Full", "Rarefied"))
+dim(Jumps)
+Jumps$Rarefied <- factor(Jumps$Rarefied, levels = c( "Full", "Rarefied"))
+
+Thresholds <- read.csv(file.path(here(), "./exported-data/thresholds.csv"))
 grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"), h=T)
-centroid <- c(long = -75.675340, lat = 40.415240)
+centroid <- data.frame(longitude_rounded = -75.675340, latitude_rounded = 40.415240)
+jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
+```
+
+
+#2. Map of jumps
+
+```{r jumps map}
 
 # Attribute sectors
-slfdata <- attribute_sectors(grid_data, nb_sectors = 20, centroid = centroid, rotation = 4)
+slfdata <- attribute_sectors(grid_data, nb_sectors = 20, centroid = centroid, rotation = 3)
 
 # Convert table to long format
 slfdata_long <- slfdata %>% 
@@ -24,29 +100,41 @@ Results <- find_jumps(slfdata_long, gap_size = 15, bio_year = c(2014:2020))
 dim(Results$Jump)
 
 
-# Map jumps
-ggplot(data = states) +
-  geom_point(data = grid_data %>% filter(Status == "Established", bio_year %in% c(2014:2020)),
-             aes(x = longitude_rounded, y = latitude_rounded), size = 1, shape = 19, col = "grey") +
-  geom_point(data = grid_data,
-             aes(x = centroid[1], y = centroid[2]), col = "blue", shape = 4, size = 5) +
-   geom_point(data = Results$Jump, 
-             aes(x = longitude_rounded, y = latitude_rounded, fill = as.factor(bio_year)), shape = 21, size = 2) +
-  geom_text(data = states,
-            aes(X, Y, label = code), size = 4) +
-  labs(x = "Longitude", y = "Latitude")+
-  geom_sf(data = states, alpha = 0) + 
-  coord_sf(xlim = c(-82, -72), ylim = c(38, 43)) + 
-  theme(legend.position="top")
+map_rarefied <- ggplot(data = grid_data) +
+  geom_sf(data = states, fill = "white") +
+  geom_point(data = grid_data %>% filter(slf_established == T), 
+             aes(x = longitude_rounded, y = latitude_rounded), col = "lightgrey") +
+  geom_sf(data = states, alpha = 0) +
+  geom_point(data = centroid, aes(x = longitude_rounded, y = latitude_rounded), col = "black", shape = 4, size = 5) +
+  geom_point(data = Jumps,
+             aes(x = longitude_rounded, y = latitude_rounded, 
+                 col = as.factor(bio_year), stroke = Rarefied, group = Rarefied, shape = Rarefied), size = 4) +
+  
+  scale_discrete_manual(aesthetics = "stroke", values = c('Rarefied' = 1, 'Full' = 2)) +
+  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
+  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_alpha_manual(values = c(0.5, 1)) +
+  
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 43)) +
+  labs(x = "Longitude", y = "Latitude") +
+  theme(legend.position="right", text = element_text(size = 10),
+        panel.background = element_rect(fill = "white"),
+        legend.key = element_rect(fill = "white")) +
+   guides(colour = guide_legend("Biological year"), alpha = guide_legend("Dataset"), fill = guide_legend("Biological year"))
 
+map_rarefied
+
+ggsave(file.path(here(), "figures", "manuscript figures", "1.map_jumps.jpg"), map_rarefied, height = 8, width = 8)
 
 ```
+
 
 Optimization figure (figure 1)
 ## Optimization
 ```{r create figure of optimization}
 
-sectors = c(20)
+sectors = c(20,)
 rotations = c(7)
 centroid <- c(-75.675340, 40.415240)
 optim <- data.frame(sectors = 0,
