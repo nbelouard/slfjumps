@@ -1,0 +1,308 @@
+---
+title: "Untitled"
+author: "Nadege Belouard"
+date: "4/11/2022"
+output: html_document
+---
+
+```{r buffers around rail and roads}
+# Full dataset
+# Rail
+rail_21180 <- st_buffer(rail, dist = 21180) #100% jumps
+st_write(rail_21180, file.path(here(), "figures", "GIS", "rail_buffer_21180.shp"))
+
+rail_6570 <- st_buffer(rail, dist = 6570) #95% jumps
+st_write(rail_6570, file.path(here(), "figures", "GIS", "rail_buffer_6570.shp"))
+
+rail_1340 <- st_buffer(rail, dist = 1340) #75% jumps
+st_write(rail_1340, file.path(here(), "figures", "GIS", "rail_buffer_1340.shp"))
+
+
+# Rarefied dataset
+rail_9790 <- st_buffer(rail, dist = 9790) #100% jumps
+st_write(rail_9790, file.path(here(), "figures", "GIS", "rail_buffer_9790.shp"))
+
+rail_7120 <- st_buffer(rail, dist = 7120) #95% jumps
+st_write(rail_7120, file.path(here(), "figures", "GIS", "rail_buffer_7120.shp"))
+
+rail_2590 <- st_buffer(rail, dist = 2590) #75% jumps
+st_write(rail_2590, file.path(here(), "figures", "GIS", "rail_buffer_2590.shp"))
+
+# Road
+road_3570 <- st_buffer(road, dist = 3570) #100% jumps
+st_write(road_3570, file.path(here(), "figures", "GIS", "road_buffer_3570.shp"))
+
+road_1810 <- st_buffer(road, dist = 1810) #95% jumps
+st_write(road_1810, file.path(here(), "figures", "GIS", "road_buffer_1810.shp"))
+
+road_730 <- st_buffer(road, dist = 730) #75% jumps
+st_write(road_730, file.path(here(), "figures", "GIS", "road_buffer_730.shp"))
+
+
+# Rarefied dataset
+road_3370 <- st_buffer(road, dist = 3370) #100% jumps
+st_write(road_3370, file.path(here(), "figures", "GIS", "road_buffer_3370.shp"))
+
+road_2970 <- st_buffer(road, dist = 2970) #95% jumps
+st_write(road_2970, file.path(here(), "figures", "GIS", "road_buffer_2970.shp"))
+
+road_980 <- st_buffer(road, dist = 980) #75% jumps
+st_write(road_980, file.path(here(), "figures", "GIS", "road_buffer_980.shp"))
+
+
+# Intersections
+# Full dataset
+Rail_road_full_100 <- st_intersection(rail_21180, road_3570)
+st_write(Rail_road_full_100, file.path(here(), "figures", "GIS", "road_rail_intersect_full_100.shp"))
+
+Rail_road_full_95 <- st_intersection(rail_6570, road_1810)
+st_write(Rail_road_full_95, file.path(here(), "figures", "GIS", "road_rail_intersect_full_95.shp"))
+
+Rail_road_full_75 <- st_intersection(rail_1340, road_730)
+st_write(Rail_road_full_75, file.path(here(), "figures", "GIS", "road_rail_intersect_full_75.shp"))
+
+# Rare dataset
+Rail_road_rare_100 <- st_intersection(rail_9790, road_3370)
+st_write(Rail_road_rare_100, file.path(here(), "figures", "GIS", "road_rail_intersect_rare_100.shp"))
+
+Rail_road_rare_95 <- st_intersection(rail_7120, road_2970)
+st_write(Rail_road_rare_95, file.path(here(), "figures", "GIS", "road_rail_intersect_rare_95.shp"))
+
+Rail_road_rare_75 <- st_intersection(rail_2590, road_980)
+st_write(Rail_road_rare_75, file.path(here(), "figures", "GIS", "road_rail_intersect_rare_75.shp"))
+dim(Rail_road_rare_75)
+```
+
+# Airports, ports
+```{r airports, ports}
+
+## SLF dropped at destination:
+# through people transportation:
+
+# Primary airports (points, buffer radius = 1 000 m)
+# List given by FAA, location given by National Transportation Dataset (USGS)
+airports <- st_read(filepath(here(), "C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Airports/airports_primary_buffer.shp"), quiet = T)
+airports <- st_transform(airports, crs = "ESRI:102010")
+st_crs(airports)
+
+# Through goods transportation:
+# Ports (points, buffer radius = 200 m)
+# These are ports as defined by the USGS ScienceBase-Catalog
+ports <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Ports/Ports_projected_buffer200.shp", quiet = T)
+st_crs(ports)
+```
+
+
+## Risk buffer
+```{r map risk buffer}
+
+rail_6570 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_6570.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_rail_6570.jpg"), rail, width = 6, height = 6)
+
+
+####
+
+
+rail_1340 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_1340.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = rail_1340, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_rail_1340.jpg"), rail, width = 6, height = 6)
+
+
+
+####
+
+
+rail_21180 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_21180.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
+    geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+    geom_sf(data = rail_1340, fill = "red", col = "red") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_rail_95_75.jpg"), rail, width = 6, height = 6)
+
+
+
+
+### roads
+
+####
+
+
+road_1810 <- st_read(file.path(here(), "figures", "GIS", "road_buffer_1810.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
+    # geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+    geom_sf(data = road_1810, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_road_1810.jpg"), rail, width = 6, height = 6)
+
+
+
+### 
+
+road_730 <- st_read(file.path(here(), "figures", "GIS", "road_buffer_730.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
+    # geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+    geom_sf(data = road_730, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_road_730.jpg"), rail, width = 6, height = 6)
+
+
+
+## intersect
+
+road_rail_75 <- st_read(file.path(here(), "figures", "GIS", "road_rail_intersect_full_75.shp"), quiet = T)
+
+
+# Visualize shapefiles
+rail <- ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
+    # geom_sf(data = rail_6570, fill = "orange", col = "orange") +
+    geom_sf(data = road_rail_75, fill = "orange", col = "orange") +
+  geom_sf(data = states, alpha = 0) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") +
+    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
+  coord_sf(xlim = c(500000, 2000000), 
+           ylim = c(-900000, 700000))
+
+ggsave(file.path(here(), "figures", "GIS_roadrail_75.jpg"), rail, width = 6, height = 6)
+
+aaa
+```
+
+
+## Are airports and ports far from roads and railroads?
+```{r check distance airports with railroads and roads}
+
+# Calculate the distances to transport infrastructures (from the data frame)
+airports %<>% add_column(DistToRail = NA,
+                         DistToRoad = NA) %>% 
+  st_cast("POLYGON")
+
+# Visualize shapefiles
+ggplot(data = states) +
+    geom_sf(fill = "white") +
+  geom_sf(data = airports, col = "blue") +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+
+#Calculate their distance to transport infrastructures
+for (j in 1:length(airports$DistToRail)){ 
+  print(j)
+  point_clip <- st_buffer(airports[j,], dist = 5000)
+  
+  road_clip <- st_intersection(road, point_clip)
+  dist_road <- st_distance(x = airports[j,], y = road_clip)
+  airports$DistToRoad[j] <- min(dist_road)
+  
+  rail_clip <- st_intersection(rail, point_clip)
+  dist_rail <- st_distance(x = airports[j,], y = rail_clip)
+  airports$DistToRail[j] <- min(dist_rail)
+}
+
+airports %>% filter(DistToRail == Inf | is.na(DistToRail))
+airports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+
+for (j in 1:length(airports$DistToRail)){ 
+  if (airports$DistToRail[j] == Inf){
+    print(j)
+
+    # Calculate distance to the closest railroad
+    dist_rail <- st_distance(x = airports[j,], y = rail)
+    airports$DistToRail[j] <- min(dist_rail)
+  }
+  
+  if (airports$DistToRoad[j] == Inf){
+    print(j)
+
+    # Calculate distance to the closest road
+    dist_road <- st_distance(x = airports[j,], y = road)
+    airports$DistToRoad[j] <- min(dist_road)
+  }
+}
+
+
+## Same for ports
+ports %<>% add_column(DistToRail = NA,
+                      DistToRoad = NA) %>% 
+  st_cast("POLYGON")
+
+for (j in 1:length(ports$DistToRail)){ 
+  print(j)
+  point_clip <- st_buffer(ports[j,], dist = 1000)
+  
+  road_clip <- st_intersection(road, point_clip)
+  dist_road <- st_distance(x = ports[j,], y = road_clip)
+  ports$DistToRoad[j] <- min(dist_road)
+  
+  rail_clip <- st_intersection(rail, point_clip)
+  dist_rail <- st_distance(x = ports[j,], y = rail_clip)
+  ports$DistToRail[j] <- min(dist_rail)
+}
+
+
+ports %>% filter(DistToRail == Inf | is.na(DistToRail))
+ports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+``` 
+
+
+\newpage

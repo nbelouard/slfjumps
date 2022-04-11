@@ -5,14 +5,14 @@ author:
 - Sebastiona De Bona^[Temple University, seba.debona@temple.edu]
 - Jocelyn E. Behm^[Temple University, jebehm@temple.edu]
 - Matthew R. Helmus^[Temple University, mrhelmus@temple.edu]
-date: "4/8/2021"
+date: "4/8/2022"
 output:
-  pdf_document:
-    toc: TRUE
-    toc_depth: 2
   html_document:
     toc: TRUE
     toc_depth: 3
+  pdf_document:
+    toc: TRUE
+    toc_depth: 2
 params:
   display: FALSE
   run: TRUE
@@ -25,8 +25,6 @@ editor_options:
 #1. Setup
 
 ```{r setup for rendering, include = F, messages = F, warning = F}
-# First we set parameters and install all the necessary packages
-knitr::opts_chunk$set(dpi = 300, warning = FALSE, message = FALSE, echo = FALSE)
 
 # attaching necessary packages
 library(tidyverse)
@@ -85,7 +83,7 @@ jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
 
 #2. Map of jumps
 
-```{r jumps map}
+```{r jumps map 1, eval = F}
 
 # Attribute sectors
 slfdata <- attribute_sectors(grid_data, nb_sectors = 20, centroid = centroid, rotation = 3)
@@ -125,14 +123,14 @@ map_rarefied <- ggplot(data = grid_data) +
 
 map_rarefied
 
-ggsave(file.path(here(), "figures", "manuscript figures", "1.map_jumps.jpg"), map_rarefied, height = 8, width = 8)
+# ggsave(file.path(here(), "figures", "manuscript figures", "1.map_jumps.jpg"), map_rarefied, height = 8, width = 8)
 
 ```
 
 
 Optimization figure (figure 1)
 ## Optimization
-```{r create figure of optimization}
+```{r create figure of optimization, eval = F}
 
 sectors = c(20,)
 rotations = c(7)
@@ -286,7 +284,7 @@ ggsave("./figures/vignette_quadrants/optim_plot3.jpg", optim_plot, height = 6, w
 
 Maps of thresholds for each parameter sets.
 
-```{r map of threshold points per year per rotation, fig.cap = "Map of SLF jumps", fig.height=6, fig.width=10}
+```{r map of threshold points per year per rotation, fig.cap = "Map of SLF jumps", fig.height=6, fig.width=10, eval = F}
 centroid <- c(-75.675340, 40.415240)
 
 
@@ -305,7 +303,7 @@ map_thresholds <- ggplot(data = states) +
 coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) +
   theme(legend.position="top")
 
-ggsave("./figures/vignette_quadrants/map_thresholds.jpg", map_thresholds, width = 15, height = 10)
+# ggsave("./figures/vignette_quadrants/map_thresholds.jpg", map_thresholds, width = 15, height = 10)
 
 
 
@@ -410,7 +408,7 @@ We keep DP8GS15, DP12GS10 and DP12GS15, DP16GS15.
 
 Maps of jumps for each parameter sets.
 
-```{r map of jumps per params per year, fig.cap = "Map of SLF jumps", fig.height=6, fig.width=10}
+```{r map of jumps per params per year, fig.cap = "Map of SLF jumps", fig.height=6, fig.width=10, eval = F}
 
 map_jumps2016 <- ggplot(data = states) +
   geom_point(data = Jumps %>%  filter(bio_year %in% c(2014:2015)),
@@ -525,7 +523,7 @@ ggsave("../figures/vignette_quadrants/map_jumps_2020.jpg", map_jumps2020 , width
 ```
 
 
-```{r map all jumps per params set}
+```{r map all jumps per params set, eval = F}
 
 # All jumps one set
 map_jumps <- ggplot(data = states) +
@@ -550,7 +548,7 @@ ggsave("./figures/vignette_quadrants/map_jumps.jpg", map_jumps , width = 8, heig
 
 ## Figure 2
 
-```{r load dataset}
+```{r load dataset, eval = F}
 Jumps <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
 head(Jumps)
 Jumps %<>% mutate(Rarefied = ifelse(is.na(Rarefied), "Full", "Rarefied"))
@@ -575,7 +573,7 @@ jumps_plot <- ggplot() +
 
 jumps_plot
 
-ggsave("./figures/vignette_quadrants/jumps_plotv2.jpg", jumps_plot, height = 2.5, width = 4)
+# ggsave("./figures/vignette_quadrants/jumps_plotv2.jpg", jumps_plot, height = 2.5, width = 4)
 
 
 
@@ -608,7 +606,7 @@ map_rarified <- ggplot(data = grid_data) +
 
 map_rarified
 
-ggsave("./figures/vignette_quadrants/jumps_map.jpg", map_rarified, height = 4, width = 4)
+# ggsave("./figures/vignette_quadrants/jumps_map.jpg", map_rarified, height = 4, width = 4)
 
 library(cowplot)
 fig2 <- ggdraw() +
@@ -617,11 +615,11 @@ fig2 <- ggdraw() +
   draw_plot(map_rarified, .5, 0, .5, .5) +
   draw_plot_label(c("(A)", "(B)", "(C)"), c(0, 0, 0.5), c(1, 0.5, 0.5), size = 15)
 fig2
-ggsave("./figures/vignette_quadrants/fig2b.jpg", fig2, height = 10, width = 10)
+# ggsave("./figures/vignette_quadrants/fig2b.jpg", fig2, height = 10, width = 10)
 
 
 jumps <- plot_grid(jumps_plot, map_rarified, labels=c("A", "B"), ncol = 2, nrow = 1)
-ggsave("./figures/vignette_quadrants/fig2c.jpg", jumps, height = 5, width = 10)
+# ggsave("./figures/vignette_quadrants/fig2c.jpg", jumps, height = 5, width = 10)
 
 
 
@@ -694,7 +692,7 @@ MeanDist_jump
 JumpLength_tot %>% group_by(Rarefied, bio_year) %>% summarise(mean(DistToThreshold))
 
 summary(aov(DistToThreshold ~ bio_year, data = JumpLength))
-ggsave("./figures/vignette_quadrants/distv2.jpg", MeanDist_jump, height = 2.5, width = 4)
+# ggsave("./figures/vignette_quadrants/distv2.jpg", MeanDist_jump, height = 2.5, width = 4)
 
 
 library(cowplot)
@@ -705,7 +703,7 @@ fig2 <- ggdraw() +
   draw_plot_label(c("(a)", "(b)", "(c)"), c(0, 0, 0.5), c(1, 0.35, 0.35), size = 15) +
   theme(plot.background = element_rect(fill="#FFFFFF", color = NA))
 fig2
-ggsave("./figures/vignette_quadrants/fig2h.jpg", fig2, height = 10, width = 10)
+# ggsave("./figures/vignette_quadrants/fig2h.jpg", fig2, height = 10, width = 10)
 
 
 library(gridExtra)
@@ -718,7 +716,7 @@ grid.arrange(grobs = list(map_rarified, jumps_plot, MeanDist_jump),
 
 ```
 
-```{r figure total spread/diffusive spread for slf established, fig.cap = "Evolution of the radius of the invasion over time, when diffusive spread and jump dispersal are separated", echo=FALSE, message = FALSE}
+```{r figure total spread/diffusive spread for slf established, fig.cap = "Evolution of the radius of the invasion over time, when diffusive spread and jump dispersal are separated", echo=FALSE, message = FALSE, eval = F}
 
 #Data on total spread
 
@@ -737,3 +735,4 @@ spread <- ggplot(data = spread_distances_tab, aes(x = bio_year, y = MaxDist)) +
 
 spread
 ```
+

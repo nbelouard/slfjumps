@@ -1,0 +1,59 @@
+---
+title: Interactive maps of all the jump events identified in the invasion of the spotted
+  lanternfly
+author: "Nadege Belouard"
+date: "4/11/2022"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup for rendering, include = F, messages = F, warning = F}
+# First we set parameters and install all the necessary packages
+knitr::opts_chunk$set(fig.width=10, fig.height=6, echo = F)
+
+# attaching necessary packages
+library(tidyverse)
+library(magrittr)
+library(here)
+library(slfjumps)
+library(leaflet)
+
+jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
+```
+
+## Map of all the jumps
+```{r jumps map}
+pal <- colorFactor(rep(rainbow(5), 8), 
+                   domain = unique(jump_groups$Group))
+
+leaflet(data = jump_groups) %>% 
+      addTiles() %>% 
+      addCircleMarkers(lng = ~longitude_rounded, 
+                       lat = ~latitude_rounded, 
+                       color = ~pal(Group), 
+                       label = ~Group)  
+
+```
+
+
+
+## Map of outbreaks only (N > 1)
+```{r outbreaks map}
+
+outbreaks_count <- jump_groups %>% count(Group) %>% filter(n > 1)
+outbreaks <- merge(jump_groups, outbreaks_count)
+
+pal <- colorFactor(rep(rainbow(5), 8), 
+                   domain = unique(jump_groups$Group))
+
+leaflet(data = outbreaks) %>% 
+      addTiles() %>% 
+      addCircleMarkers(lng = ~longitude_rounded, 
+                       lat = ~latitude_rounded, 
+                       color = ~pal(Group), 
+                       label = ~Group)  
+
+```
