@@ -1,0 +1,41 @@
+---
+title: "Untitled"
+author: "Nadege Belouard"
+date: "4/11/2022"
+output: html_document
+---
+Map data
+```{r map data}
+# Big map
+surveys <- ggplot(data = states) +
+  geom_sf(fill = "white") +
+  geom_point(data = grid_data,
+             aes(x = longitude_rounded, y = latitude_rounded), col = "gray", size = 1) +
+  geom_sf(data = states, fill = "white", alpha = 0) +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-90, -70), ylim = c(33, 45)) +
+  theme_classic() +
+  theme(legend.position="bottom", legend.key = element_rect(fill = "white", colour = NA)) 
+surveys
+
+ggsave(file.path(here(), "figures", "points_all.jpg"), surveys, width = 6, height = 6)
+
+# Zoomed map
+surveys <- ggplot(data = states) +
+  geom_sf(fill = "white") +
+  geom_point(data = grid_data %>% filter(Status == "Negative surveys"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = Status), size = 0.01) +
+    geom_sf(data = hull, alpha = 0, fill = "white") +
+    geom_point(data = slf_uptodate %>% filter(Status == "Positive surveys"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = Status), size = 0.1) +
+  scale_color_manual(values = c("gray", "black")) +
+  geom_sf(data = states, fill = "white", alpha = 0) +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-83, -72), ylim = c(37, 44)) +
+  theme_classic() +
+  theme(legend.position="bottom", legend.key = element_rect(fill = "white", colour = NA)) 
+
+surveys
+
+ggsave(file.path(here(), "figures", "points2.jpg"), surveys, width = 6, height = 6)
+```

@@ -5,6 +5,77 @@ date: "4/11/2022"
 output: html_document
 ---
 
+# 3. Intersection of risk zones
+
+If we create a buffer around roads and railways so as to include all jumpers, we can design a map of locations at risk of jump dispersal (Figure 8). In other words, all jump dispersal identified so far occurred within the orange buffer. This type of map can be used to concentrate survey efforts on locations considered at risk based on spread records.
+
+```{r show buffer intersecting road and rail, fig.height=4, fig.width = 6, fig.cap="Buffer zones around railways and roads that include all jumpers"}
+
+max(jumpers_DP16GS15$DistToAirport) #30295.97 m
+quantile(jumpers_DP16GS15$DistToAirport,c(.025,.975))
+
+max(jumpers_DP16GS15$DistToRail) #21189 m
+quantile(jumpers_DP16GS15$DistToRail,c(.025,.975)) #10829 m 
+quantile(jumpers_DP16GS15$DistToRail,c(.05,.95)) # 8391 m
+quantile(jumpers_DP16GS15$DistToRail,c(.1,.9)) # 4889 m
+
+max(jumpers_DP16GS15$DistToRoad) #10360.52 m
+quantile(jumpers_DP16GS15$DistToRoad,c(.025,.975)) #3172 m 
+quantile(jumpers_DP16GS15$DistToRoad,c(.05,.95)) # 2031 m
+quantile(jumpers_DP16GS15$DistToRoad,c(.1,.9)) # 1211 m
+
+railroad <- merge(rail, road)
+
+Buffer_risk <- ggplot(data = world) +
+    geom_sf() +
+    geom_sf(data = states, fill = "white") +
+    geom_sf(data = Railroad_buffer, fill = "orange") +
+    coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+Buffer_risk
+
+# ggsave("../figures/vignette_highrisk/bufferrisk_railroad.jpg", Buffer_risk, width = 6, height = 4)
+```
+
+
+High-risk areas were listed because they concentrate flow of people. It is interesting to see if they are situated in the buffer where actual jump events were found.
+
+```{r show buffer intersecting road and rail with high risk areas, fig.height=4, fig.width = 6, fig.cap="Location of high-risk areas relative to the buffer zones including all jumpers"}
+HighRiskLoc <- st_read("../GIS/HighRiskLoc.shp", quiet = T)
+
+Highrisk_buffer <- ggplot(data = world) +
+    geom_sf() +
+    geom_sf(data = states, fill = "white") +
+    # geom_sf(data = Railroad_buffer, fill = "orange") +
+  geom_sf(data = HighRiskLoc, aes(col = InBuffer)) +
+    coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top")
+
+Highrisk_buffer
+
+# ggsave("../figures/vignette_highrisk/highrisk_buffer.jpg", Highrisk_buffer, width = 6, height = 6)
+```
+
+The green-blue dots represent high-risk area situated within the risk buffer, and red points are high-risk areas outside of this buffer (Figure 9). A substantial proportion of high-risk areas are thus at risk. We can look further into it by checking whether this varies between categories of high-risk areas.
+
+```{r barplot of the proportion of high-risk locations included in risk buffer per category, fig.height=3, fig.width = 9, fig.cap="Proportion of in-buffer high-risk locations per category"}
+
+Prophighrisk_inbuffer <- ggplot(HighRiskLoc, aes(x = category)) + 
+  geom_bar(aes(fill = InBuffer), position="fill") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+Prophighrisk_inbuffer
+
+# ggsave("../figures/vignette_highrisk/Prophighrisk_inbuffer.jpg", Prophighrisk_inbuffer, width = 9, height = 3)
+```
+
+We notice on Figure 10 that most campgrounds, race tracks, saw mills and summer camps are situated outside of the risk buffer. It could mean that these locations are generally not at risk compared to the others.
+
+
 ```{r buffers around rail and roads}
 # Full dataset
 # Rail
