@@ -665,9 +665,12 @@ JumpLength %<>% rowwise() %>%
   mutate(DistToThreshold = as.vector(distm(c(longitude_rounded, latitude_rounded), 
                                            c(longitude_threshold, latitude_threshold), fun = distGeo))/1000)
 
+write.csv(JumpLength, file.path(here(), "exported-data", "DistToThreshold.csv"))
+
 JumpLength_tot <- rbind(JumpLength %>% filter(Rarefied == "Rarefied"),
                         JumpLength %>% mutate(Rarefied = "Full"))
 dim(JumpLength_tot)[1] == 37+135
+
 
 
 # Jitter

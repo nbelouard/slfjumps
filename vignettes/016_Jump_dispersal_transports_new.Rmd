@@ -1130,3 +1130,85 @@ ModelsInt %>% summarise(meanInt = mean(Int_est),
 ```
 
 
+# 6. Check for differences between outbreaks and non-outbreaks
+
+```{r load data for oubreaks vs non outbreaks}
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"))
+
+jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
+
+DistToThreshold <- read.csv(file.path(here(), "exported-data", "DistToThreshold.csv")) 
+dim(DistToThreshold)
+
+# Join all jumpers, their distances and their groups
+outbreaks <- slf_uptodate %>% 
+  filter(Category_full == "Jumpers") %>% 
+  left_join(jump_groups %>% select(-slf_present, -slf_established, -theta, -DistToSLF))
+
+# Define which groups are outbreaks: identify groups with duplicates and attribute them a TRUE value.
+outbreaks %<>% mutate(Outbreaks = ifelse(outbreaks$Group %in% unique(outbreaks[duplicated(outbreaks$Group),10]), TRUE, FALSE))
+
+head(outbreaks)
+dim(outbreaks)
+
+# Merge DistToThreshold
+outbreaks %<>% left_join(DistToThreshold %>% select(-X, -slf_present, -slf_established, -theta, -DistToSLF, -Rarefied, -sectors, -longitude_threshold, -latitude_threshold))
+
+# Now select only the rarefied points
+jumps_compare <- outbreaks %>% filter(Category_rare == "Jumpers")
+head(jumps_compare)
+dim(jumps_compare)
+
+#Remove DistToIntro
+jumps_compare %<>% select(-DistToIntro) 
+```
+
+Boxplot
+```{r boxplot outbreaks vs non outbreaks}
+
+# pivot dataset for facet_wrap
+jumps_compare_long <- jumps_compare %>% 
+  pivot_longer(cols = starts_with("Dist"), names_to = "DistanceType", values_to = "DistanceValue")
+
+# Order the variables (for plots)
+unique(jumps_compare_long$DistanceType)
+jumps_compare_long$DistanceType <- factor(jumps_compare_long$DistanceType, levels = c("DistToThreshold", "DistToRail", "DistToRoad", "DistIntRlRd"))
+
+# Boxplot
+outbreaks <- ggplot(jumps_compare_long, aes(y = DistanceValue/1000, x = Outbreaks)) + 
+  geom_boxplot(aes(col= Outbreaks)) +
+  facet_wrap(~DistanceType, scales = "free_y", ncol = 4,
+             labeller = labeller(DistanceType = 
+    c("DistToThreshold" = "Invasion front", 
+      "DistToRail" = "Railroad",
+      "DistToRoad" = "Major road",
+      "DistIntRlRd" = "Both"))) +
+  ylab("Distance to... (km)") +
+  theme_classic()
+
+outbreaks
+
+ggsave(file.path(here(), "figures", "jump_transports", "3. boxplot outbreaks.jpg"), outbreaks, width = 10, height = 3)
+
+```
+
+Statistical test
+```{r statistical test outbreak vs non-outbreak}
+table(jumps_compare$Outbreaks)
+
+t.test(DistToThreshold ~ Outbreaks, data = jumps_compare)
+wilcox.test(DistToThreshold ~ Outbreaks, data = jumps_compare, paired = F)
+# W = 167, p-value = 0.865
+
+t.test(DistToRail ~ Outbreaks, data = jumps_compare)
+wilcox.test(DistToRail ~ Outbreaks, data = jumps_compare, paired = F)
+# W = 184, p-value = 0.486
+
+t.test(DistToRoad ~ Outbreaks, data = jumps_compare)
+wilcox.test(DistToRoad ~ Outbreaks, data = jumps_compare, paired = F)
+# W = 170, p-value = 0.7928
+
+t.test(DistIntRlRd ~ Outbreaks, data = jumps_compare)
+wilcox.test(DistIntRlRd ~ Outbreaks, data = jumps_compare, paired = F)
+# W = 168, p-value = 0.8408
+```
