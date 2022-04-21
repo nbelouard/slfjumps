@@ -1,0 +1,198 @@
+---
+title: "Untitled"
+author: "Nadege Belouard"
+date: "4/21/2022"
+output: html_document
+---
+# 4. PREDICTIONS
+
+
+```{r binomial model}
+
+# Take jumpers vs diffusers or jumpers vs non-jumpers?
+slf_chull <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
+slf_chull %<>% mutate(Jump = ifelse(Category_full == "Jumpers", 1, 0))
+table(slf_chull$Jump)
+
+# Test effect of candidate variables
+library(MuMIn)
+# install.packages("AICcmodavg")
+library(AICcmodavg)
+# install.packages("reshape")
+library(reshape)
+library(data.table)
+
+fullmodel <- glm(Jump ~ scale(DistToRoad) + scale(DistToRail) + scale(DistToAirport), data = slf_chull, family = binomial, na.action = na.fail)
+plotresid(fullmodel)
+summary(fullmodel)
+chat = fullmodel$deviance/fullmodel$df.residual
+
+dredge(fullmodel, rank = AICc, extra="R^2")
+dredge(fullmodel, rank = QAICc, extra="R^2", chat=chat)
+
+model_airports <- glm(Jump ~ DistToAirport, family = binomial, data = grid_DP16GS15)
+model_rail <- glm(Jump ~ DistToRail, family = binomial, data = grid_DP16GS15)
+model_road <- glm(Jump ~ DistToRoad, family = binomial, data = grid_DP16GS15)
+```
+
+## Binomial model rail
+```{r binomial model rail}
+#Prediction RAIL
+# Sample negatives
+negatives <- slf_chull %>% filter(Status == "Negative surveys")
+jumps <- slf_chull %>% filter(Jump == "1")
+dim(jumps)
+range(slf_chull$DistToRail)
+
+DistToRail = seq(0,10000, length.out = 101)
+df = NULL
+prob = NULL 
+
+for (i in 1:10000){
+  sample_negative <- negatives[sample(nrow(negatives), size = dim(jumps)[1], replace = FALSE),]
+  dataset <- rbind(jumps, sample_negative)
+  
+  model <- glm(Jump ~ DistToRail, data = dataset, family = binomial, na.action = na.fail)
+  model_res <- summary(model)
+  p <- model_res$coefficients[2]
+  newdata <- data.frame(DistToRoad)
+  newdata %<>% add_column(predict = predict(model, newdata = newdata, type = "response"))
+  prob <- rbind(prob, p)
+  df <- rbind(df, newdata)
+}
+
+head(df)
+dim(df)
+max(prob)
+hist(prob)
+write.csv(prob, "p_jumps_rail.csv", row.names = F)
+write.csv(df, "prediction_jumps_rail.csv", row.names = F)
+
+
+prediction_jumps_rail <- ggplot(df) + 
+  geom_point(aes(x = DistToRail, y = p)) +
+  ylim(c(0,1))+
+  theme_classic() +
+  ylab("Probability of a jump") +
+  xlab("Distance to a railroad")
+  
+ggsave(file.path(here(), "figures", "vignette-transports", "prediction_jumps_rail.jpg"))
+
+
+means <- df %>% group_by(DistToRail) %>% 
+  summarise(meanp = mean(p),
+            p975 = quantile(p, 0.975),
+            p025 = quantile(p, 0.025),
+            min = min(p),
+            max = max(p))
+
+prediction_jumps_rail <- ggplot(means, 
+                                aes(x = DistToRail, y = meanp)) + 
+  geom_line() +
+  geom_point(size = 0.1) +
+  ylim(c(0,1))+
+  theme_classic() +
+  geom_errorbar(aes(ymin = p025, ymax = p975), width=.2,
+                 position=position_dodge(.9)) +
+  ylab("Probability of a jump") +
+  xlab("Distance to a railroad (m)")
+  
+ggsave(file.path(here(), "figures", "vignette_transports", "prediction_jumps_rail_ic95.jpg"))
+       
+```
+
+
+## Binomial model road
+```{r binomial model road}
+#Prediction RAIL
+# Sample negatives
+negatives <- slf_chull %>% filter(Status == "Negative surveys")
+jumps <- slf_chull %>% filter(Jump == "1")
+dim(jumps)
+range(slf_chull$DistToRail)
+
+hist(slf_chull$DistToRoad, breaks = 100)
+
+DistToRoad = seq(0,10000, length.out = 101)
+df = NULL
+prob = NULL
+
+for (i in 1:10000){
+  sample_negative <- negatives[sample(nrow(negatives), size = dim(jumps)[1], replace = FALSE),]
+  dataset <- rbind(jumps, sample_negative)
+  
+  model <- glm(Jump ~ DistToRoad, data = dataset, family = binomial, na.action = na.fail)
+  model_res <- summary(model)
+  p <- model_res$coefficients[2]
+  newdata <- data.frame(DistToRoad)
+  newdata %<>% add_column(predict = predict(model, newdata = newdata, type = "response"))
+  prob <- rbind(prob, p)
+  df <- rbind(df, newdata)
+}
+
+head(df)
+dim(df)
+max(prob)
+hist(prob)
+write.csv(prob, "p_jumps_roads.csv", row.names = F)
+write.csv(df, "prediction_jumps_road.csv", row.names = F)
+
+
+
+# BOTH PREDICTIONS
+
+df_road <- read.csv(file.path(here(), "prediction_jumps_road.csv"))
+df_rail <- read.csv(file.path(here(), "prediction_jumps_rail.csv"))
+
+means_road <- df_road %>% group_by(DistToRoad) %>% 
+  summarise(meanp = mean(p),
+            p975 = quantile(p, 0.975),
+            p025 = quantile(p, 0.025),
+            min = min(p),
+            max = max(p)) %>% 
+    add_column(Transport = "Road") %>% 
+  rename(DistTo = DistToRoad)
+means_road[11,]
+means_rail <- df_rail %>% group_by(DistToRail) %>% 
+  summarise(meanp = mean(p),
+            p975 = quantile(p, 0.975),
+            p025 = quantile(p, 0.025),
+            min = min(p),
+            max = max(p)) %>% 
+  add_column(Transport = "Rail") %>% 
+  rename(DistTo = DistToRail)
+
+means_rail[11,]
+data <- rbind(means_road, means_rail)
+
+
+prediction_jumps <- ggplot() + 
+  geom_line(data = data, aes(x = DistTo, y = meanp, col = Transport)) +
+  geom_point(data = data, aes(x = DistTo, y = meanp, col = Transport), size = 1) +
+    geom_errorbar(data = data, aes(x = DistTo, ymin = p025, ymax = p975, col = Transport), width=.2) +
+  scale_color_manual(values = c("black", "darkgray")) +
+  ylim(c(0,1))+
+  xlim(c(0,2000)) +
+  theme_classic() +
+  ylab("Risk of jump event") +
+  xlab("Distance to... (m)")
+  
+ggsave(file.path(here(), "figures", "vignette_transports", "prediction_jumps_railroad.jpg"), prediction_jumps, width = 6, height = 5)
+       
+```
+
+\newpage 
+
+# 5. Results and conclusion
+
+
+In this vignette, we found that:  
+
+(1) Jumpers and diffusers are situated significantly close to high-risk areas. These high-risk areas could be preferential locations for the progression of the invasion.
+
+(2) We created a risk buffer around transport infrastructures comprising all jump events so far. This risk buffer could be used as a guide to focus survey efforts and ensure an early detection of future jump events.
+
+(3) Some categories of high-risk areas are not as close to transport infrastructures as others, and are not situated in the risk buffer. Namely, campgrounds, race tracks, saw mills and summer camps might not be considered as high-risk areas based on these analyses. 
+
+
+This vignette concludes a series of 3 vignettes on the analysis of spread records of the spotted lanternfly. Results can be used to improve our knowledge of SLF dispersal, to follow the evolution of the invasion, and to direct survey efforts.

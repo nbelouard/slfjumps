@@ -5,6 +5,33 @@ date: "4/11/2022"
 output: html_document
 ---
 
+(3) Finally, we will use the knowledge we have on the location of SLF jumpers relative to transports, to project potential areas of colonization over six states (PA, WV, VA, MD, DE, NJ). We will assess the proportion of high-risk locations that are situated in this zone, and whether there are variations between categories of high-risk locations.
+
+
+Check the position of jumps relative to these intersects
+```{r jumps map}
+
+#load the resulting shapefile
+roadrail_intersect <- st_read(file.path(here(), "figures", "GIS", "roadrail200m_dissolve.shp"), quiet = T)
+roadrail_intersect <- st_read(file.path(here(), "figures", "GIS", "roadrail100m_union.shp"), quiet = T)
+
+#load the jumps file
+jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
+
+pal <- colorFactor(rep(rainbow(5), 8), 
+                   domain = unique(jump_groups$Group))
+
+leaflet(data = jump_groups) %>% 
+  addTiles() %>% 
+  addPolygons(data = roadrail_intersect) %>%
+  addCircleMarkers(lng = ~longitude_rounded, 
+                       lat = ~latitude_rounded, 
+                       color = ~pal(Group), 
+                       label = ~Group)  
+
+```
+
+
 # 3. Intersection of risk zones
 
 If we create a buffer around roads and railways so as to include all jumpers, we can design a map of locations at risk of jump dispersal (Figure 8). In other words, all jump dispersal identified so far occurred within the orange buffer. This type of map can be used to concentrate survey efforts on locations considered at risk based on spread records.

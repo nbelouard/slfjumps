@@ -275,6 +275,7 @@ We divide the invasion records into sectors to increase the accuracy of subseque
 
 ```{r load dataset}
 grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"), h=T)
+dim(grid_data)
 ```
 
 Now we need to figure out the best set of parameters to find the accurate number of jumps, i.e. the highest number of jumps detected by the algorithm. To do so, we run several analysis with extreme sets of parameters to get closer to a plateau in the number of jumps that are found, before a finer optimization is done.
