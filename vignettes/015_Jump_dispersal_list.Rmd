@@ -719,7 +719,10 @@ ggsave(file.path(here(), "figures", "jump_list", "10.jumps_number_boxplot.jpg"),
 
 # Summary
 JumpLength_tot %>% group_by(Rarefied, bio_year) %>% summarise(mean(DistToThreshold))
-summary(aov(DistToThreshold ~ bio_year, data = JumpLength))
+summary(aov(DistToThreshold ~ bio_year, data = JumpLength)) #p = 0.37
+
+summary(aov(DistToThreshold ~ bio_year, data = JumpLength %>% filter(Rarefied == "Rarefied"))) # p = 0.34
+
 ```
 
 

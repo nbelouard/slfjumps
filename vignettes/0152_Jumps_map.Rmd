@@ -22,6 +22,8 @@ library(slfjumps)
 library(leaflet)
 
 jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
+jumps <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
+jumps %<>% filter(Rarefied == T) 
 ```
 
 ## Map of all the jumps
@@ -34,7 +36,12 @@ leaflet(data = jump_groups) %>%
       addCircleMarkers(lng = ~longitude_rounded, 
                        lat = ~latitude_rounded, 
                        color = ~pal(Group), 
-                       label = ~Group)  
+                       label = ~Group) %>% 
+  addCircleMarkers(data = jumps, lng = ~longitude_rounded, 
+                       lat = ~latitude_rounded,
+                   stroke = FALSE,
+                       fillOpacity = 0.5,
+                       radius = 6)
 
 ```
 

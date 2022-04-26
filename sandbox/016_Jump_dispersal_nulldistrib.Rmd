@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "Generate a null distribution for rail and roads"
 author: "Nadege Belouard"
 date: "1/18/2022"
 output: html_document
@@ -23,27 +23,27 @@ library(FSA)
 
 ```
 
-# 7. Generate random dispersal distribution
 
+# 1. Generate random dispersal distribution
 
-Generate all points
-```{r prepare set of possible points, eval = T}
+Load files
+```{r read files}
 
-# Map slfEStab
-grid <- read.csv(file.path(here(), "exported-data", "grid_data.csv"))
+# Load points from chull
+grid_data <- read.csv(file.path(here(), "exported-data", "grid_chull_unique.csv"))
 head(grid_data)
-grid <- grid_data
-dim(grid_data %>% filter(bio_year != 2021))
 dim(grid_data)
-# slfEstab <- grid %>% filter(Status == "Established", bio_year != 2021)
-slfEstab <- grid_data %>% filter(slf_established == TRUE)
-slfEstab_layer <- st_as_sf(x = slfEstab, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F)
-slfEstab_layer <- st_transform(slfEstab_layer, crs = "ESRI:102010")
 
+#Create a sf layer of positive points
+slfEstab <- grid_data %>% filter(slf_established == TRUE)
+slfEstab_layer <- st_as_sf(x = slfEstab, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F) %>%
+  st_transform(slfEstab_layer, crs = "ESRI:102010")
+
+# Create a US map 
 US <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/states/gadm36_Cont_USA_county/gadm36_Cont_USA_county.shp", crs = "EPSG:4326", quiet = T)
 st_crs(US)
 US <- st_transform(US, crs = "ESRI:102010")
-Pennsylvania <- US %>% filter(NAME_1 == "Pennsylvania")
+
 
 # Visualize the SLF data
 ggplot(data = US, fill = "white") +
@@ -51,11 +51,13 @@ ggplot(data = US, fill = "white") +
   geom_sf(data = slfEstab_layer, col = "blue") +
   labs(x = "Longitude", y = "Latitude") +
   coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+```
 
 
+Generate all possible random coordinates
+```{r generate coordinates}
 
-## Generate all possible coordinates of the random distribution
-# Calculate all potential coordinates
+# (1) Calculate all potential coordinates
 maxlat <- max(slfEstab$latitude_rounded)
 minlat <- min(slfEstab$latitude_rounded)
 maxlong <- max(slfEstab$longitude_rounded)  
@@ -64,9 +66,11 @@ minlong <- min(slfEstab$longitude_rounded)
 Seqlat <- seq(from = minlat, to = maxlat, by = 1/111)
 Seqlong <- seq(from = minlong, to = maxlong, by = 1/85)
 Coordinates <- expand.grid(latitude = Seqlat, longitude = Seqlong)
-Coordinates <- st_as_sf(x = Coordinates, coords = c("longitude", "latitude"), crs = "EPSG:4269", remove = F)
-Coordinates <- st_transform(Coordinates, crs = "ESRI:102010")
+Coordinates <- st_as_sf(x = Coordinates, coords = c("longitude", "latitude"), crs = "EPSG:4269", remove = F) %>%
+  st_transform(Coordinates, crs = "ESRI:102010")
 
+
+# Map these points
 ggplot(data = US, fill = "white") +
   geom_sf() +
   geom_sf(data = Coordinates, alpha = 0.5) +
@@ -74,21 +78,8 @@ ggplot(data = US, fill = "white") +
   coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
 
 
-# Create the minimum convex polygon of the SLF data
-hull <- st_convex_hull(st_union(slfEstab_layer))
-
-chull <- ggplot(data = states, fill = "white") +
-  geom_sf() +
-  # geom_sf(data = Coordinates, alpha = 0.5) +
-  geom_sf(data = hull, alpha = 0.5, fill = "yellow") + 
-  # geom_sf(data = buffer, alpha = 0.5, fill = "red") +
-  # geom_sf(data = slfEstab_layer, col = "blue") +
-  labs(x = "Longitude", y = "Latitude") +
-  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
-
-
-# Keep only the coordinates that are in the minimum convex polygon
-## The alternative is to keep all coordinates that are in a buffer around the SLF detections
+# (2) Keep only the coordinates that are in the minimum convex polygon
+chull <- st_read(file.path(here(), "figures", "GIS", "chull.shp"), quiet = T)
 Coordinates_chull <- st_intersection(Coordinates, hull)
 
 ggplot(data = US, fill = "white") +
@@ -99,62 +90,38 @@ ggplot(data = US, fill = "white") +
   coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
 
 
-#Keep only those that are on land!
+# (3) Keep only those that are on land!
 Coordinates_land <- st_intersection(Coordinates_chull, US)
 
 random_coord <- ggplot(data = states, fill = "white") +
   geom_sf() +
-  # geom_sf(data = Coordinates_land, alpha = 0.5) +
-  geom_sf(data = hull, alpha = 0.5, fill = "white") + 
-  geom_point(data = slfEstab_layer,
-             aes(x = longitude_rounded, y = latitude_rounded), col = "black") +
+  geom_sf(data = Coordinates_land, alpha = 0.5) +
+  geom_sf(data = chull, alpha = 0.5, fill = "white") + 
+  # geom_point(data = slfEstab_layer,
+             # aes(x = longitude_rounded, y = latitude_rounded), col = "black") +
   labs(x = "Longitude", y = "Latitude") +
   coord_sf(xlim = c(-82, -72), ylim = c(37, 43)) +
   theme_classic()
 
+
+# Save the file
 Coordinates_land %<>% select(latitude, longitude, geometry)
-st_write(Coordinates_land, file.path(here(), "exported-data", "Distances_random distrib", "coordinates_set.shp"), driver = "ESRI Shapefile")
-
-Coordinates_land <- st_read(file.path(here(), "exported-data", "Distances_random distrib", "coordinates_set.shp"), quiet = T)
-
-
-
-
-
-# Keep only surveys that are within the chull
-slf_layer <- st_as_sf(x = slf_uptodate, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F)
-slf_layer <- st_transform(slf_layer, crs = "ESRI:102010")
-slf_chull <- st_intersection(slf_layer, hull)
-
-ggplot(data = states, fill = "white") +
-  geom_sf() +
-  geom_sf(data = slf_layer) +
-  geom_sf(data = hull, alpha = 0.5, fill = "yellow") + 
-  geom_sf(data = slf_chull, col = "blue") +
-  labs(x = "Longitude", y = "Latitude") +
-  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
-
-st_geometry(slf_chull) <- NULL
-write.csv(slf_chull, file.path(here(), "exported-data", "points_chull.csv"), row.names = F)
-
-slf_chull <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
-dim(slf_chull %>% filter(Status == "Positive surveys"))[1]/dim(slf_chull)[1] #32,743 points
-table(slf_chull$Status) #18% positive points
+st_write(Coordinates_land, file.path(here(), "exported-data", "slf_sim_coordinates.shp"), driver = "ESRI Shapefile")
 
 ```
 
 
-Calculate distances for the grid of random points (step done on the HPC - computationally intensive)
-```{r sample points and calculate distances}
-dim(jumpers)
-Coordinates_land <- st_read(file.path(here(), "exported-data", "Distances_random distrib", "coordinates_set.shp"), quiet = T)
+# 2. Calculate distances for the grid of random points 
+(step done on the HPC - computationally intensive). Can reduce the time by removing points for which we already have data from the previous vignette (observed data)
+```{r calculate distances}
 
+Coordinates_land <- st_read(file.path(here(), "exported-data", "slf_sim_coordinates.shp"), quiet = T)
+
+missing_distances <- setdiff(Coordinates_land, grid_chull_unique)
 
 # Create rows for distances
-Coordinates_land %<>% add_column(DistToRail = NA,
-                          DistToRoad = NA,
-                          DistToAirport = NA,
-                          DistToPort = NA)
+missing_distances %<>% add_column(DistToRail = NA,
+                          DistToRoad = NA)
 
 #Calculate their distance to transport infrastructures
 for (j in 1:length(Coordinates_land$DistToRail)){ 
@@ -173,81 +140,41 @@ for (j in 1:length(Coordinates_land$DistToRail)){
   dist_road <- st_distance(x = Coordinates_land[j,], y = road_clip)
   Coordinates_land$DistToRoad[j] <- min(dist_road)
   
-  # Calculate distance to the closest international/millitary airport
-  dist_airport <- st_distance(x = Coordinates_land[j,], y = airports)
-  Coordinates_land$DistToAirport[j] <- min(dist_airport)
-  
-  # Calculate distance to the closest port
-  dist_port <- st_distance(x = Coordinates_land[j,], y = ports)
-  Coordinates_land$DistToPort[j] <- min(dist_port)
-  
   rm(point_clip, rail_clip, road_clip)
   
   # Stores the result every 1,000 iteration to avoid loosing all the data in case of crash
   if (i %% 1000 == 0){
-    st_write(Coordinates_land, "./exported-data/Distances_random distrib/random_distances_transport.shp", row.names = F)
+    st_write(Coordinates_land, file.path(here(), "exported-data", "slf_sim_dist_transports.shp"), row.names = F)
   }
 }
 
 
 # Save file
 st_geometry(Coordinates_land) <- NULL
-write.csv(Coordinates_land, "./exported-data/Distances_observed/random_distances_transport.csv", row.names = F)
+write.csv(Coordinates_land, file.path(here(), "exported-data", "slf_sim_dist_transports.csv"), row.names = F)
 ```
 
 
-The dataset was computed in 4 files on the HPC, we combine them in one file.
+# 3. Create random datasets
+Extract 9,999 random datasets of the same number of points as the observed data
 
-```{r assemble the dataset}
-random_dist1 <- read.csv(file.path(here(), "exported-data", "Distances_random distrib", "random_distances_transport0-66000.csv"))
-random_dist2 <- read.csv(file.path(here(), "exported-data", "Distances_random distrib", "random_distances_transport66-100000.csv"))
-random_dist3 <- read.csv(file.path(here(), "exported-data", "Distances_random distrib", "random_distances_transport100-140000.csv"))
-random_dist4 <- read.csv(file.path(here(), "exported-data", "Distances_random distrib", "random_distances_transport140-end.csv"))
+Full dataset
+```{r select random full datasets}
 
-Coordinates_land <- rbind(random_dist1[0:66000,], random_dist2[66001:100000,],
-      random_dist3[100001:140000,], random_dist4[140001:length(random_dist4$latitude),])
-dim(Coordinates_land) == dim(random_dist1)
-
-# Verify that there is no 0
-Coordinates_land %>% filter(DistToRail == Inf | is.na(DistToRail))
-Coordinates_land %>% filter(DistToRoad == Inf | is.na(DistToRoad))
-
-write.csv(Coordinates_land, "./exported-data/Distances_random distrib/Random_transport.csv", row.names = F)
-
-```
-
-
-# Select random datasets
-
-```{r select random datasets}
-
-Coordinates_land <- read.csv(file.path(here(), "exported-data", "Distances_random distrib", "Random_transport.csv"))
+# Load distances and points
+Sim_dist_transport <- read.csv(file.path(here(), "exported-data", "slf_sim_dist_transport.csv"))
 head(Coordinates_land)
 
 slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"), h=T)
 
-slf_uptodate <- read.csv(file.path(here(), "exported-data", "points_chull.csv"), h=T)
-
 # Size of the dataset to be sampled
 jumpers_full = dim(slf_uptodate %>% filter(Category_full == "Jumpers"))[1]
-jumpers_rarefied = dim(slf_uptodate %>% filter(Category_rare == "Jumpers"))[1]
-diffusers_full = dim(slf_uptodate %>% filter(Category_full == "Diffusers"))[1]
-diffusers_rarefied = dim(slf_uptodate %>% filter(Category_rare == "Diffusers"))[1]
-negatives = dim(slf_uptodate %>% filter(Category_full == "Negatives"))[1]
-#There is no difference in the negatives between the full and rarefied datasets!
 
 
 for (i in 1:1){
   #Generate a set of coordinates
-  Random_jumpers_full <- Coordinates_land[sample(nrow(Coordinates_land), size = jumpers_full, replace = F),] %>%
+  Random_coordinates <- Coordinates_land[sample(nrow(Coordinates_land), size = jumpers_full, replace = F),] %>%
     add_column(Category_full = "Jumpers")
-  Random_diffusers_full <- Coordinates_land[sample(nrow(Coordinates_land), size = diffusers_full, replace = F),] %>%
-    add_column(Category_full = "Diffusers")
-  Random_negatives <- Coordinates_land[sample(nrow(Coordinates_land), size = negatives, replace = F),] %>%
-    add_column(Category_full = "Negatives")
-  
-  Random_coordinates <- rbind(Random_jumpers_full, Random_diffusers_full,
-                              Random_negatives)
   
   #Calculate the mean and median distance per simulation
   Random_means <- Random_coordinates %>% group_by(Category_full) %>% 
@@ -265,23 +192,25 @@ for (i in 1:1){
 } 
 
 # write.csv(Simulations, "./exported-data/Distances_random distrib/SimulatedMeans_fulluptodate.csv", row.names = F)
-write.csv(Simulations, "./exported-data/Distances_random distrib/SimulatedMeans_fullchull.csv", row.names = F)
+write.csv(Simulations, file.path(here(), "exported-data", "slf_sim_full_transports.csv"), row.names = F)
+```
 
+Rarefied dataset
+```{r sample rarefied dataset}
+# Load distances and points
+Sim_dist_transport <- read.csv(file.path(here(), "exported-data", "slf_sim_dist_transport.csv"))
+head(Coordinates_land)
 
-# Same for rarefied dataset
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"), h=T)
+
+# Size of the dataset to be sampled
+jumpers_rarefied = dim(slf_uptodate %>% filter(Category_rare == "Jumpers"))[1]
 
 for (i in 1:9999){
   #Generate a set of coordinates
-  Random_jumpers_rarefied <- Coordinates_land[sample(nrow(Coordinates_land), size = jumpers_rarefied, replace = F),] %>%
+  Random_coordinates <- Coordinates_land[sample(nrow(Coordinates_land), size = jumpers_rarefied, replace = F),] %>%
     add_column(Category_rarefied = "Jumpers")
-  Random_diffusers_rarefied <- Coordinates_land[sample(nrow(Coordinates_land), size = diffusers_rarefied, replace = F),] %>%
-    add_column(Category_rarefied = "Diffusers")
-  Random_negatives <- Coordinates_land[sample(nrow(Coordinates_land), size = negatives, replace = F),] %>%
-    add_column(Category_rarefied = "Negatives")
-  
-  Random_coordinates <- rbind(Random_jumpers_rarefied, Random_diffusers_rarefied,
-                              Random_negatives)
-  
+
   #Calculate the mean and median distance per simulation
   Random_means <- Random_coordinates %>% group_by(Category_rarefied) %>% 
     summarise_at(vars(starts_with("DistTo")), list(mean = mean, median = median)) %>% 
@@ -297,22 +226,13 @@ for (i in 1:9999){
   if (i %% 100 == 0){ print(i)}
 } 
 
-write.csv(Simulations, "./exported-data/Distances_random distrib/SimulatedMeans_rarefiedchull.csv", row.names = F)
+write.csv(Simulations, file.path(here(), "exported-data", "slf_sim_rarefied_transports.csv"), row.names = F)
 
 ```
 
 
 Map points
 ```{r map of random points for jumpers, fig.width= 6, fig.height=7, eval = FALSE}
-# Check on the first randomly generated dataset that the points location corresponds to the expectation in each disk portion (Figure 2).
-
-# All possible coordinates
-ggplot(data = states) +
-  geom_sf(fill = "white") + 
-  geom_sf(data = Coordinates_land, col = "blue") +
-  labs(x = "Longitude", y = "Latitude")+
-  theme(legend.position="top")
-
 
 # Example of random coordinates
 ggplot(data = states) +
@@ -322,86 +242,56 @@ ggplot(data = states) +
   geom_text(data = states, aes(X, Y, label = code), size = 5) +
   theme(legend.position="top") +
   coord_sf(xlim = c(-82, -72), ylim = c(37, 43), expand = FALSE)
-  
-
-# Actual jumps
-jumpers <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
-jumpers <- st_as_sf(x = jumpers, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F)
-jumpers <- st_transform(jumpers, crs = "ESRI:102010")
-st_crs(jumpers)
-
-ggplot(data = states) +
-  geom_sf(fill = "white") + 
-  geom_sf(data = jumpers, col = "red") +
-  labs(x = "Longitude", y = "Latitude")+
-  theme(legend.position="top")
-
 ```
 
 
 
-# Visualize results
+# 4. Visualize results
 
-slf chull
-```{check results with negatives in chull only}
+Load observed data
+```{r load observed data}
+
+# Convert the observed data to long format, get the average values
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
+dim(slf_uptodate) #32,743 rows
+
+# Convert to long format
+slf_uptodate_long <- slf_uptodate %>%
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+
+# Calculate mean and median
+slf_obsmeans <- slf_uptodate_long %>% 
+  group_by(Category_full, DistanceType) %>% 
+  summarise(MeanDistance = mean(DistanceValue),
+            MedianDistance = median(DistanceValue))
+```
+
+## Full dataset
+Calculate mean and median for simulated data
+```{r check results}
 
 # Load the simulated values
-Simulations_rare <- read.csv("./exported-data/Distances_random distrib/SimulatedMeans_rarefiedchull.csv")
-Simulations_full <- read.csv("./exported-data/Distances_random distrib/SimulatedMeans_fullchull.csv")
+Simulations_full <- read.csv(file.path(here(), "exported-data", "slf_sim_full_transports.csv"))
 
 # Convert simulations to long format
 Simulations_full_long <- Simulations_full %>% pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
-Simulations_full_long$Category_full <- factor(Simulations_full_long$Category_full, levels = c("Jumpers", "Diffusers", "Negatives"))
 
-Simulations_full_long_mean <- Simulations_full_long %>% filter(DistanceType %in% c("DistToRail_mean", "DistToRoad_mean", "DistToAirport_mean", "DistToPort_mean"))
+# Select only the means
+Simulations_full_long_mean <- Simulations_full_long %>%
+  filter(DistanceType %in% c("DistToRail_mean", "DistToRoad_mean"))
 Simulations_full_long_mean$DistanceType <- as.factor(Simulations_full_long_mean$DistanceType)
-levels(Simulations_full_long_mean$DistanceType)
-levels(Simulations_full_long_mean$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
+levels(Simulations_full_long_mean$DistanceType) <- c("DistToRail", "DistToRoad")
 
-
-Simulations_full_long_median <- Simulations_full_long %>% filter(DistanceType %in% c("DistToRail_median", "DistToRoad_median", "DistToAirport_median", "DistToPort_median"))
+# Select only the medians
+Simulations_full_long_median <- Simulations_full_long %>% filter(DistanceType %in% c("DistToRail_median", "DistToRoad_median"))
 Simulations_full_long_median$DistanceType <- as.factor(Simulations_full_long_median$DistanceType)
-levels(Simulations_full_long_median$DistanceType)
-levels(Simulations_full_long_median$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
+levels(Simulations_full_long_median$DistanceType) <- c("DistToRail", "DistToRoad")
+```
 
+Visualize results
+```{r mean and median for observed values}
 
-# Convert the observed data to long format, get the average values
-slf_uptodate <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
-dim(slf_uptodate) #32,743 rows
-
-
-# test with only points from the convex hull
-# slf_uptodate <- slf_chull
-slf_uptodate_long <- slf_uptodate %>%
-  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
-slf_obsmeans <- slf_uptodate_long %>% 
-  group_by(Category_full, DistanceType) %>% 
-  summarise(#MeanDistance = mean(DistanceValue),
-            MedianDistance = median(DistanceValue))
-slf_obsmeans$Category_full <- factor(slf_obsmeans$Category_full, levels = c("Jumpers", "Diffusers", "Negatives"))
-
-
-# Full dataset
-# Plot observed vs simulated means
-random_transport <- ggplot() +
-  geom_histogram(data = Simulations_full_long_mean, 
-                 aes(x =  DistanceValue/1000, y = ..density.., fill = Category_full), binwidth = 0.1) +
-  geom_vline(data = slf_obsmeans,
-             mapping = aes(xintercept = MeanDistance/1000, col = Category_full), size = 1) +
-  scale_fill_brewer(palette = "Dark2") +
-  scale_color_brewer(palette = "Dark2") +
-  xlab("Distance to the nearest... (km)") +
-  ylab("Count (simulations)") +
-  facet_wrap(~Category_full + DistanceType, ncol = 4, scale = "free") +
-  theme_classic() +
-  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
-
-ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_fullmeanschull.jpg"), random_transport, width = 10, height = 9)
-
-
-
-
-## Jumpers only
+#Plot means
 random_transport <- ggplot() +
   geom_histogram(data = Simulations_full_long_mean %>% filter(Category_full == "Jumpers"), 
                  aes(x =  DistanceValue/1000, y = ..density.., fill = Category_full), binwidth = 0.1) +
@@ -415,28 +305,11 @@ random_transport <- ggplot() +
   theme_classic() +
   guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
 
-ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_fullmeanschull_jumpers.jpg"), random_transport, width = 10, height = 3)
+ggsave(file.path(here(), "figures", "jump_transports", "bootstrap_transports_fullmeans.jpg"), random_transport, width = 10, height = 3)
 
 
 
-# Plot observed vs simulated medians
-random_transport <- ggplot() +
-  geom_histogram(data = Simulations_full_long_median, 
-                 aes(x =  DistanceValue/1000, y = ..density.., fill = Category_full), binwidth = 0.1) +
-  geom_vline(data = slf_obsmeans,
-             mapping = aes(xintercept = MedianDistance/1000, col = Category_full), size = 1) +
-  scale_fill_brewer(palette = "Dark2") +
-  scale_color_brewer(palette = "Dark2") +
-  xlab("Distance to the nearest... (km)") +
-  ylab("Count (simulations)") +
-  facet_wrap(~Category_full + DistanceType, ncol = 4, scale = "free") +
-  theme_classic() +
-  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
-
-ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_fullmedianschull.jpg"), random_transport, width = 10, height = 9)
-
-
-# Jumpers only
+# Plot medians
 random_transport <- ggplot() +
   geom_histogram(data = Simulations_full_long_median %>% filter(Category_full == "Jumpers"), 
                  aes(x =  DistanceValue/1000, y = ..density.., fill = Category_full), binwidth = 0.1) +
@@ -453,8 +326,10 @@ random_transport <- ggplot() +
 random_transport
 
 ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_fullmedianschull_jumpers.jpg"), random_transport, width = 10, height = 3)
+``` 
 
-
+Count simulations
+```{r count simulations}
 # COUNT HOW MANY SIMULATIONS ARE SMALLER THAN THE OBS VALUE
 obsrail <- slf_obsmeans %>% filter(Category_full == "Jumpers", DistanceType == "DistToRail") %>% pull(MedianDistance) 
 dim(Simulations_full_long_median %>% filter(Category_full == "Jumpers", DistanceType == "DistToRail", DistanceValue < obsrail))[1]
@@ -463,52 +338,41 @@ dim(Simulations_full_long_median %>% filter(Category_full == "Jumpers", Distance
 obsroad <- slf_obsmeans %>% filter(Category_full == "Jumpers", DistanceType == "DistToRoad") %>% pull(MedianDistance) 
 dim(Simulations_full_long_median %>% filter(Category_full == "Jumpers", DistanceType == "DistToRoad", DistanceValue < obsrail))[1]
 #0
-
-obsairport <- slf_obsmeans %>% filter(Category_full == "Jumpers", DistanceType == "DistToAirport") %>% pull(MedianDistance) 
-dim(Simulations_full_long_median %>% filter(Category_full == "Jumpers" & DistanceType == "DistToAirport" & DistanceValue < obsairport))[1]
-#1728
-
-obsport <- slf_obsmeans %>% filter(Category_full == "Jumpers", DistanceType == "DistToPort") %>% pull(MedianDistance) 
-dim(Simulations_full_long_median %>% filter(Category_full == "Jumpers" & DistanceType == "DistToPort" & DistanceValue < obsport))[1]
-#9997
+```
 
 
-# Same with rarefied
+## Rarefied dataset
+Calculate mean and median for simulated data
+```{r count simulations rarefied}
+
+# Load the simulated values
+Simulations_rare <- read.csv(file.path(here(), "exported-data", "slf_sim_rarefied_transports.csv"))
+
 # Convert simulations to long format
 Simulations_rare_long <- Simulations_rare %>% pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
 Simulations_rare_long %<>% rename(Category_rare = Category_rarefied) 
 Simulations_rare_long$Category_rare <- factor(Simulations_rare_long$Category_rare, levels = c("Jumpers", "Diffusers", "Negatives"))
 
+
+# Select only the means
 Simulations_rare_long_mean <- Simulations_rare_long %>% filter(DistanceType %in% c("DistToRail_mean", "DistToRoad_mean", "DistToAirport_mean", "DistToPort_mean"))
 Simulations_rare_long_mean$DistanceType <- as.factor(Simulations_rare_long_mean$DistanceType)
 levels(Simulations_rare_long_mean$DistanceType)
 levels(Simulations_rare_long_mean$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
 
-
+# Select only the medians
 Simulations_rare_long_median <- Simulations_rare_long %>% filter(DistanceType %in% c("DistToRail_median", "DistToRoad_median", "DistToAirport_median", "DistToPort_median"))
 Simulations_rare_long_median$DistanceType <- as.factor(Simulations_rare_long_median$DistanceType)
 levels(Simulations_rare_long_median$DistanceType)
 levels(Simulations_rare_long_median$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
+```
 
+Visualize results
+```{r visualize rare}
 
-# Convert the observed data to long format, get the average values
-slf_uptodate <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
-dim(slf_uptodate) #32,743 rows
-
-# test with only points from the convex hull
-# slf_uptodate <- slf_chull
-slf_uptodate_long <- slf_uptodate %>%
-  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
-slf_obsmeans <- slf_uptodate_long %>% 
-  group_by(Category_rare, DistanceType) %>% 
-  summarise(MeanDistance = mean(DistanceValue),
-            MedianDistance = median(DistanceValue))
-slf_obsmeans$Category_rare <- factor(slf_obsmeans$Category_rare, levels = c("Jumpers", "Diffusers", "Negatives"))
-
-
-# Plot observed vs simulated means
+#Plot means
 random_transport <- ggplot() +
-  geom_histogram(data = Simulations_rare_long_mean, 
+  geom_histogram(data = Simulations_rare_long_mean %>% filter(Category_rare == "Jumpers"), 
                  aes(x =  DistanceValue/1000, y = ..density.., fill = Category_rare), binwidth = 0.1) +
   geom_vline(data = slf_obsmeans,
              mapping = aes(xintercept = MeanDistance/1000, col = Category_rare), size = 1) +
@@ -523,25 +387,7 @@ random_transport <- ggplot() +
 ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_raremeanschull.jpg"), random_transport, width = 10, height = 9)
 
 
-
-# Plot observed vs simulated medians
-random_transport <- ggplot() +
-  geom_histogram(data = Simulations_rare_long_median, 
-                 aes(x =  DistanceValue/1000, y = ..density.., fill = Category_rare), binwidth = 0.1) +
-  geom_vline(data = slf_obsmeans,
-             mapping = aes(xintercept = MedianDistance/1000, col = Category_rare), size = 1) +
-  scale_fill_brewer(palette = "Dark2") +
-  scale_color_brewer(palette = "Dark2") +
-  xlab("Distance to the nearest... (km)") +
-  ylab("Count (simulations)") +
-  facet_wrap(~Category_rare + DistanceType, ncol = 4, scale = "free") +
-  theme_classic() +
-  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
-
-ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_raremedianschull.jpg"), random_transport, width = 10, height = 9)
-
-
-## Jumpers
+# Plot median
 random_transport <- ggplot() +
   geom_histogram(data = Simulations_rare_long_median %>% filter(Category_rare == "Jumpers"), 
                  aes(x =  DistanceValue/1000, y = ..density.., fill = Category_rare), binwidth = 0.1) +
@@ -556,8 +402,10 @@ random_transport <- ggplot() +
   guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
 
 ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_raremedianschull_jumpers.jpg"), random_transport, width = 10, height = 3)
+```
 
-
+Count simulations
+```{r count simulations rare}
 
 # COUNT HOW MANY SIMULATIONS ARE SMALLER THAN THE OBS VALUE
 obsrail <- slf_obsmeans %>% filter(Category_rare == "Jumpers", DistanceType == "DistToRail") %>% pull(MedianDistance) 
@@ -567,28 +415,14 @@ dim(Simulations_rare_long_median %>% filter(Category_rare == "Jumpers", Distance
 obsroad <- slf_obsmeans %>% filter(Category_rare == "Jumpers", DistanceType == "DistToRoad") %>% pull(MedianDistance) 
 dim(Simulations_rare_long_median %>% filter(Category_rare == "Jumpers", DistanceType == "DistToRoad", DistanceValue < obsrail))[1]
 #148
-
-obsairport <- slf_obsmeans %>% filter(Category_rare == "Jumpers", DistanceType == "DistToAirport") %>% pull(MedianDistance) 
-dim(Simulations_rare_long_median %>% filter(Category_rare == "Jumpers" & DistanceType == "DistToAirport" & DistanceValue < obsairport))[1]
-#620
-
-obsport <- slf_obsmeans %>% filter(Category_rare == "Jumpers", DistanceType == "DistToPort") %>% pull(MedianDistance) 
-dim(Simulations_rare_long_median %>% filter(Category_rare == "Jumpers" & DistanceType == "DistToPort" & DistanceValue < obsport))[1]
-#6647
-
-slf_obsmeans
-
 ``` 
 
 
-
-
-
+## Check distribution of observed distances
 ```{r check distribution of observed distances}
-slf_uptodate <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
 dim(slf_uptodate) #43,801 rows
 
-# slf_uptodate <- slf_chull
 slf_uptodate_long <- slf_uptodate %>%
   pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
 
@@ -605,31 +439,11 @@ ggsave(file.path(here(), "figures", "vignette_transports", "distribution_observe
 ```
 
 
-# SLF 101
-```{r slf 101}
-# Simulated means
-MeanDistances <- read.csv(file.path(here(), "exported-data", "Distances_random distrib", "SimulatedMeans_fullchull.csv"))
-names(MeanDistances)
-head(MeanDistances)
+# 5. Calculate effect sizes
 
-#Modify dataset to get distribution of distances with a column for the type of distance, and one column for the type of dataset (Full or Rarefied)
-random_long <- MeanDistances %>%
-  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
-
-
-## FOR MATT SLF 101 MEAN FULL
-random_long_mean <- random_long %>% filter(grepl("_mean", DistanceType))
-head(random_long_mean)
-random_long_mean$DistanceType <- as.factor(random_long_mean$DistanceType)
-levels(random_long_mean$DistanceType)
-levels(random_long_mean$DistanceType) <- gsub(pattern = "_mean", replacement = "", x = levels(random_long_mean$DistanceType))
-
-
-head(random_long_mean)
-summary_sim_full <- random_long_mean %>% group_by(Category_full, DistanceType) %>% summarise(mean_sim = mean(DistanceValue), sd_sim = sd(DistanceValue))
-head(summary_sim_full)
-
-
+## Full dataset
+Load observed data
+```{r load observed data}
 # Observed data
 slf_uptodate <- read.csv(file.path(here(), "exported-data", "points_chull.csv"))
 slf_cat_long <- slf_uptodate %>%
@@ -640,6 +454,33 @@ slf_obsmeans <- slf_cat_long %>%
   summarise(MeanDistance = mean(DistanceValue)#,
             # MedianDistance = median(DistanceValue)
             )
+```
+
+Load simulated data
+```{r effect sizes}
+# Simulated means
+MeanDistances <- read.csv(file.path(here(), "exported-data",  "SimulatedMeans_fullchull.csv"))
+names(MeanDistances)
+head(MeanDistances)
+
+#Modify dataset to get distribution of distances with a column for the type of distance, and one column for the type of dataset (Full or Rarefied)
+random_long <- MeanDistances %>%
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+```
+
+Means
+```{r long mean}
+
+random_long_mean <- random_long %>% filter(grepl("_mean", DistanceType))
+head(random_long_mean)
+random_long_mean$DistanceType <- as.factor(random_long_mean$DistanceType)
+levels(random_long_mean$DistanceType)
+levels(random_long_mean$DistanceType) <- gsub(pattern = "_mean", replacement = "", x = levels(random_long_mean$DistanceType))
+
+
+head(random_long_mean)
+summary_sim_full <- random_long_mean %>% group_by(Category_full, DistanceType) %>% summarise(mean_sim = mean(DistanceValue), sd_sim = sd(DistanceValue))
+head(summary_sim_full)
 
 
 summary_full <- merge(summary_sim_full, slf_obsmeans)
@@ -688,10 +529,11 @@ ggplot(summary_full_cat, aes(y = effect_size, x = DistanceType)) +
   # xlab("Category") + ylab("Distance to the nearest... (km)") +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-  
+```
 
+Medians
+```{r median}
 
-## FOR MATT SLF 101 MEDIANS FULL
 random_long_median <- random_long %>% filter(grepl("_median", DistanceType))
 head(random_long_median)
 random_long_median$DistanceType <- as.factor(random_long_median$DistanceType)
@@ -703,16 +545,6 @@ head(random_long_median)
 summary_sim_medianfull <- random_long_median %>% group_by(Category_full, DistanceType) %>% summarise(median_sim = median(DistanceValue), sd_sim = sd(DistanceValue))
 head(summary_sim_medianfull)
 
-
-
-slf_obsmedians <- slf_cat_long %>% 
-  group_by(Category_full, DistanceType) %>% 
-  summarise(MedianDistance = median(DistanceValue)#,
-            # MedianDistance = median(DistanceValue)
-            )
-
-
-
 summary_medianfull <- merge(summary_sim_medianfull, slf_obsmedians)
 summary_medianfull %<>% rename(median_obs = MedianDistance) %>% 
   mutate(effect_size = (median_obs - median_sim)/sd_sim)
@@ -723,18 +555,38 @@ summary_medianfull_cat <- merge(summary_medianfull, Names)
 write.csv(summary_medianfull_cat, "summary_simulations_median_full_transports.csv")
 ```
 
-```{r slf 101 rarefied}
 
-## FOR MATT SLF 101 MEAN RAREFIED
+## Rarefied dataset
+
+Load observed data
+```{r load observed data}
+# Observed data
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_uptodate.csv"))
+slf_cat_long <- slf_uptodate %>%
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+
+slf_obsmeans <- slf_cat_long %>% 
+  group_by(Category_rare, DistanceType) %>% 
+  summarise(MeanDistance = mean(DistanceValue)#,
+            # MedianDistance = median(DistanceValue)
+            )
+```
+
+Load simulated data
+```{r effect sizes rarefied}
+
 # Simulated means
-MeanDistances <- read.csv(file.path(here(), "exported-data", "Distances_random distrib", "SimulatedMeans_rarefiedchull.csv"))
+MeanDistances <- read.csv(file.path(here(), "exported-data",  "SimulatedMeans_rarefiedchull.csv"))
 names(MeanDistances)
 head(MeanDistances)
 
 #Modify dataset to get distribution of distances with a column for the type of distance, and one column for the type of dataset (Full or Rarefied)
 random_long <- MeanDistances %>%
   pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+```
 
+Means 
+```{r means rare}
 random_long_mean <- random_long %>% filter(grepl("_mean", DistanceType))
 head(random_long_mean)
 random_long_mean$DistanceType <- as.factor(random_long_mean$DistanceType)
@@ -747,17 +599,6 @@ summary_sim_rare <- random_long_mean %>% group_by(Category_rarefied, DistanceTyp
 head(summary_sim_rare)
 
 
-
-slf_obsmeans <- slf_cat_long %>% 
-  group_by(Category_rare, DistanceType) %>% 
-  summarise(MeanDistance = mean(DistanceValue)#,
-            # MedianDistance = median(DistanceValue)
-            ) %>% 
-  rename(Category_rarefied = Category_rare)
-
-
-
-
 summary_rare <- merge(summary_sim_rare, slf_obsmeans)
 summary_rare %<>% rename(mean_obs = MeanDistance) %>% 
   mutate(effect_size = (mean_obs - mean_sim)/sd_sim)
@@ -766,9 +607,11 @@ write.csv(summary_rare, "summary_simulations_rare.csv")
 
 summary_rare_cat <- merge(summary_rare, Names)
 write.csv(summary_rare_cat, "summary_simulations_mean_rare_transports.csv")
+```
 
+Medians 
+```{r medians rare}
 
-## FOR MATT SLF 101 MEDIANS FULL
 random_long_median <- random_long %>% filter(grepl("_median", DistanceType))
 head(random_long_median)
 random_long_median$DistanceType <- as.factor(random_long_median$DistanceType)
@@ -781,16 +624,6 @@ summary_sim_medianrare <- random_long_median %>% group_by(Category_rarefied, Dis
 head(summary_sim_medianrare)
 
 
-
-slf_obsmedians <- slf_cat_long %>% 
-  group_by(Category_rare, DistanceType) %>% 
-  summarise(MedianDistance = median(DistanceValue)#,
-            # MedianDistance = median(DistanceValue)
-            ) %>% 
-  rename(Category_rarefied = Category_rare)
-
-
-
 summary_medianrare <- merge(summary_sim_medianrare, slf_obsmedians)
 summary_medianrare %<>% rename(median_obs = MedianDistance) %>% 
   mutate(effect_size = (median_obs - median_sim)/sd_sim)
@@ -801,7 +634,7 @@ write.csv(summary_rare_mediancat, "summary_simulations_median_rare_transports.cs
 ```
 
 
-We can visualize the results on Figure 2. The histogram represents the distribution of distances under the null hypothesis of random dispersal of jumpers, for each type of transport. The black vertical lines indicate the significance limits. An observed value situated outside of these vertical lines leads to the rejection of the null hypothesis. The red line indicates the average distance to transports observed in our dataset.  
+The histogram represents the distribution of distances under the null hypothesis of random dispersal of jumpers, for each type of transport. The black vertical lines indicate the significance limits. An observed value situated outside of these vertical lines leads to the rejection of the null hypothesis. The red line indicates the average distance to transports observed in our dataset.  
 For all three types of transports, the observed location of jumpers is significantly closer to transports than random.  
 
 
@@ -810,8 +643,6 @@ For all three types of transports, the observed location of jumpers is significa
 # 6. Results and conclusion
 
 In this vignette, we discovered that:  
-
-(0) The 40,988 surveys of the dataset that confirmed either the presence of an established SLF population or the absence of SLF have been conducted on average 13, 17 and 19 km away from major roads, railroads and airports, respectively. It is much further than random. *==> The survey method is not biased towards transport infrastructures*
 
 (1) SLF populations, both from jump events and diffusive spread, are not located randomly, but very significantly close to transport infrastructures: roads, rail and airports. The difference to the random distribution is the highest for railroads, then roads, then airports.  *==> SLF presence is tightly linked to transport infrastructures*
 
