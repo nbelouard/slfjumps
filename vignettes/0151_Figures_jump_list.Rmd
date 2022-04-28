@@ -1,5 +1,5 @@
 ---
-title: "Figures for the manuscript"
+title: "Figures of jump list for the manuscript"
 author: 
 - Nadege Belouard^[Temple University, nadege.belouard@temple.edu]
 - Sebastiona De Bona^[Temple University, seba.debona@temple.edu]
@@ -22,7 +22,7 @@ editor_options:
   chunk_output_type: console
 ---
 
-#1. Setup
+# Setup
 
 ```{r setup for rendering, include = F, messages = F, warning = F}
 
@@ -81,7 +81,8 @@ jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
 ```
 
 
-#2. Map of jumps
+
+#Figure S1. Map of jumps
 
 ```{r jumps map 1, eval = F}
 
@@ -127,9 +128,44 @@ map_rarefied
 
 ```
 
+Map data
+```{r map data}
+# Big map
+surveys <- ggplot(data = states) +
+  geom_sf(fill = "white") +
+  geom_point(data = grid_data,
+             aes(x = longitude_rounded, y = latitude_rounded), col = "gray", size = 1) +
+  geom_sf(data = states, fill = "white", alpha = 0) +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-90, -70), ylim = c(33, 45)) +
+  theme_classic() +
+  theme(legend.position="bottom", legend.key = element_rect(fill = "white", colour = NA)) 
+surveys
 
-Optimization figure (figure 1)
-## Optimization
+ggsave(file.path(here(), "figures", "points_all.jpg"), surveys, width = 6, height = 6)
+
+# Zoomed map
+surveys <- ggplot(data = states) +
+  geom_sf(fill = "white") +
+  geom_point(data = grid_data %>% filter(Status == "Negative surveys"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = Status), size = 0.01) +
+    geom_sf(data = hull, alpha = 0, fill = "white") +
+    geom_point(data = slf_uptodate %>% filter(Status == "Positive surveys"),
+             aes(x = longitude_rounded, y = latitude_rounded, col = Status), size = 0.1) +
+  scale_color_manual(values = c("gray", "black")) +
+  geom_sf(data = states, fill = "white", alpha = 0) +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-83, -72), ylim = c(37, 44)) +
+  theme_classic() +
+  theme(legend.position="bottom", legend.key = element_rect(fill = "white", colour = NA)) 
+
+surveys
+
+ggsave(file.path(here(), "figures", "points2.jpg"), surveys, width = 6, height = 6)
+```
+
+# Figure S2: optimization
+
 ```{r create figure of optimization, eval = F}
 
 sectors = c(20,)
@@ -281,6 +317,179 @@ ggsave("./figures/vignette_quadrants/optim_plot3.jpg", optim_plot, height = 6, w
 ```
 
 
+
+# Figure 3: Jump list
+
+```{r load dataset, eval = F}
+Jumps <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
+head(Jumps)
+Jumps %<>% mutate(Rarefied = ifelse(is.na(Rarefied), "Full", "Rarefied"))
+dim(Jumps)
+
+Jumps$Rarefied <- factor(Jumps$Rarefied, levels = c( "Full", "Rarefied"))
+
+#2nd version with colors
+Jumps_year <- Jumps %>% group_by(bio_year, Rarefied) %>% summarise(n = n())
+ 
+jumps_plot <- ggplot() +
+  geom_bar(data = Jumps_year %>% filter(Rarefied == "Rarefied"), aes(x = bio_year, y = n, fill = as.factor(bio_year), group = Rarefied, col = as.factor(bio_year)#, alpha = Rarefied
+                                                                     ), stat = "identity", lwd = .25) +
+  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  # scale_alpha_manual(values = c(0, 1)) +
+  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  xlab("Biological year") +
+  ylab("Number of jumps") +
+  theme_classic() +
+  guides(alpha = "none", fill = "none", col = "none") +
+  theme(text = element_text(size = 10), legend.position = "top")
+
+jumps_plot
+
+# ggsave("./figures/vignette_quadrants/jumps_plotv2.jpg", jumps_plot, height = 2.5, width = 4)
+
+
+
+grid_data <- read.csv("./exported-data/grid_data.csv")
+# The number of rows must be 58,915 with 2021 preliminary data
+grid_data %<>% filter(!bio_year == 2021, longitude_rounded > -90)
+centroid <- c(-75.675340, 40.415240)
+
+
+# Map it
+map_rarified <- ggplot(data = grid_data) +
+  geom_sf(data = states, fill = "white") +
+  geom_point(data = grid_data %>% filter(Status == "Established"), aes(x = longitude_rounded, y = latitude_rounded), col = "lightgrey") +
+    geom_sf(data = states, alpha = 0) +
+    geom_point(data = grid_data, aes(x = centroid[1], y = centroid[2]), col = "black", shape = 4, size = 5) +
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 43)) +
+  geom_point(data = Jumps,
+             aes(x = longitude_rounded, y = latitude_rounded, 
+                 col = as.factor(bio_year), group = Rarefied, stroke = Rarefied, shape = Rarefied), size = 3) +
+  scale_discrete_manual(aesthetics = "stroke", values = c('Rarefied' = 1, 'Full' = 2)) +
+  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
+  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_alpha_manual(values = c(0.5, 1)) +
+  labs(x = "Longitude", y = "Latitude") +
+  theme(legend.position="right", text = element_text(size = 10),
+        panel.background = element_rect(fill = "white"),
+        legend.key = element_rect(fill = "white")) +
+   guides(colour = guide_legend("Biological year"), alpha = guide_legend("Dataset"), fill = guide_legend("Biological year"))
+
+map_rarified
+
+# ggsave("./figures/vignette_quadrants/jumps_map.jpg", map_rarified, height = 4, width = 4)
+
+library(cowplot)
+fig2 <- ggdraw() +
+  draw_plot(optim_plot, 0, .5, 1, .5) +
+  draw_plot(jumps_plot, 0, 0, .5, .5) +
+  draw_plot(map_rarified, .5, 0, .5, .5) +
+  draw_plot_label(c("(A)", "(B)", "(C)"), c(0, 0, 0.5), c(1, 0.5, 0.5), size = 15)
+fig2
+# ggsave("./figures/vignette_quadrants/fig2b.jpg", fig2, height = 10, width = 10)
+
+
+jumps <- plot_grid(jumps_plot, map_rarified, labels=c("A", "B"), ncol = 2, nrow = 1)
+# ggsave("./figures/vignette_quadrants/fig2c.jpg", jumps, height = 5, width = 10)
+
+
+
+
+# Fig 2D: mean dist to the threshold per year
+# run and save Results$Dist
+Thresholds <- read.csv("./exported-data/thresholds.csv")
+Thresholds %<>% filter(rotation_nb == 1) %>% 
+  select(longitude_rounded, latitude_rounded, bio_year, sectors_nb) %>% 
+  rename(sectors = sectors_nb,
+         latitude_threshold = latitude_rounded,
+         longitude_threshold = longitude_rounded)
+Thresholds
+
+# Attribute sectors to each jump: find sector for rotation 0
+Jumps
+Jumps %>% filter(Rarefied == TRUE)
+Jumps_sectors <- attribute_sectors(Jumps, nb_sectors = 20, centroid = c(-75.675340, 40.415240), rotation = 1) 
+Jumps_sectors %<>% select(-c(theta.1, sectors)) %>% rename(sectors = rotation1)
+Jumps_sectors %>% filter(Rarefied == TRUE)
+dim(Jumps_sectors)
+
+# Find corresponding threshold per bio year 
+library(purrr)
+JumpLength <- left_join(Jumps_sectors, Thresholds)
+JumpLength %<>% rowwise() %>%  mutate(DistToThreshold = as.vector(distm(c(longitude_rounded, latitude_rounded), c(longitude_threshold, latitude_threshold), fun = distGeo))/1000)
+
+names(JumpLength)   
+JumpLength_tot <- rbind(JumpLength %>% filter(Rarefied == "Rarefied"),
+                        JumpLength %>% mutate(Rarefied = "Full"))
+
+
+MeanDist_jump <- ggplot() +
+  geom_jitter(data = JumpLength,
+             aes(x = as.factor(bio_year), y = DistToThreshold, 
+                 # col = as.factor(bio_year), 
+                 # fill = as.factor(bio_year),
+                 shape = Rarefied), size = 3, show.legend = F) +
+  scale_alpha_manual(values = c(0.8,0)) +
+  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
+  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  labs(x = "Dataset", y = "Distance to the invasion front (km)") +
+  theme_classic() +
+  theme(legend.position="top", text = element_text(size = 10), plot.tag.position = c(0.01, 1)) +
+  guides(fill = "none", shape = "none", alpha = "none")
+MeanDist_jump
+
+
+
+# Same but boxplots
+
+JumpLength_tot$Rarefied <- factor(JumpLength_tot$Rarefied, levels = c("Rarefied", "Full"))
+MeanDist_jump <- ggplot() +
+  geom_boxplot(data = JumpLength %>% filter(Rarefied == "Rarefied"),
+             aes(x = as.factor(bio_year), y = DistToThreshold, 
+                 col = as.factor(bio_year),
+                 fill = as.factor(bio_year),
+                 alpha = Rarefied)) +
+  scale_alpha_manual(values = c(0.7,0)) +
+  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
+  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  labs(x = "Dataset", y = "Distance to the invasion front (km)") +
+  theme_classic() +
+  theme(legend.position="top", text = element_text(size = 10), plot.tag.position = c(0.01, 1)) +
+  guides(fill = "none", shape = "none", col = "none", alpha = "none")
+MeanDist_jump
+
+JumpLength_tot %>% group_by(Rarefied, bio_year) %>% summarise(mean(DistToThreshold))
+
+summary(aov(DistToThreshold ~ bio_year, data = JumpLength))
+# ggsave("./figures/vignette_quadrants/distv2.jpg", MeanDist_jump, height = 2.5, width = 4)
+
+
+library(cowplot)
+fig2 <- ggdraw() +
+  draw_plot(map_rarified, x = 0, y = .33, width = 1, height = .66) +
+  draw_plot(jumps_plot, 0, 0, .5, .33) +
+  draw_plot(MeanDist_jump, .5, 0, .5, .33) +
+  draw_plot_label(c("(a)", "(b)", "(c)"), c(0, 0, 0.5), c(1, 0.35, 0.35), size = 15) +
+  theme(plot.background = element_rect(fill="#FFFFFF", color = NA))
+fig2
+# ggsave("./figures/vignette_quadrants/fig2h.jpg", fig2, height = 10, width = 10)
+
+
+library(gridExtra)
+lay <- rbind(c(1, 1),
+              c(1, 1),
+              c(2, 3))
+grid.arrange(grobs = list(map_rarified, jumps_plot, MeanDist_jump), 
+             layout_matrix = lay,
+             widths = c(5,5), heights = c(3.33,3.33,3.33))
+
+```
+
+
+# Other figures
 
 Maps of thresholds for each parameter sets.
 
@@ -546,175 +755,6 @@ ggsave("./figures/vignette_quadrants/map_jumps.jpg", map_jumps , width = 8, heig
 ```
 
 
-## Figure 2
-
-```{r load dataset, eval = F}
-Jumps <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
-head(Jumps)
-Jumps %<>% mutate(Rarefied = ifelse(is.na(Rarefied), "Full", "Rarefied"))
-dim(Jumps)
-
-Jumps$Rarefied <- factor(Jumps$Rarefied, levels = c( "Full", "Rarefied"))
-
-#2nd version with colors
-Jumps_year <- Jumps %>% group_by(bio_year, Rarefied) %>% summarise(n = n())
- 
-jumps_plot <- ggplot() +
-  geom_bar(data = Jumps_year %>% filter(Rarefied == "Rarefied"), aes(x = bio_year, y = n, fill = as.factor(bio_year), group = Rarefied, col = as.factor(bio_year)#, alpha = Rarefied
-                                                                     ), stat = "identity", lwd = .25) +
-  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  # scale_alpha_manual(values = c(0, 1)) +
-  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  xlab("Biological year") +
-  ylab("Number of jumps") +
-  theme_classic() +
-  guides(alpha = "none", fill = "none", col = "none") +
-  theme(text = element_text(size = 10), legend.position = "top")
-
-jumps_plot
-
-# ggsave("./figures/vignette_quadrants/jumps_plotv2.jpg", jumps_plot, height = 2.5, width = 4)
-
-
-
-grid_data <- read.csv("./exported-data/grid_data.csv")
-# The number of rows must be 58,915 with 2021 preliminary data
-grid_data %<>% filter(!bio_year == 2021, longitude_rounded > -90)
-centroid <- c(-75.675340, 40.415240)
-
-
-# Map it
-map_rarified <- ggplot(data = grid_data) +
-  geom_sf(data = states, fill = "white") +
-  geom_point(data = grid_data %>% filter(Status == "Established"), aes(x = longitude_rounded, y = latitude_rounded), col = "lightgrey") +
-    geom_sf(data = states, alpha = 0) +
-    geom_point(data = grid_data, aes(x = centroid[1], y = centroid[2]), col = "black", shape = 4, size = 5) +
-  coord_sf(xlim = c(-81, -73), ylim = c(38, 43)) +
-  geom_point(data = Jumps,
-             aes(x = longitude_rounded, y = latitude_rounded, 
-                 col = as.factor(bio_year), group = Rarefied, stroke = Rarefied, shape = Rarefied), size = 3) +
-  scale_discrete_manual(aesthetics = "stroke", values = c('Rarefied' = 1, 'Full' = 2)) +
-  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
-  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  scale_alpha_manual(values = c(0.5, 1)) +
-  labs(x = "Longitude", y = "Latitude") +
-  theme(legend.position="right", text = element_text(size = 10),
-        panel.background = element_rect(fill = "white"),
-        legend.key = element_rect(fill = "white")) +
-   guides(colour = guide_legend("Biological year"), alpha = guide_legend("Dataset"), fill = guide_legend("Biological year"))
-
-map_rarified
-
-# ggsave("./figures/vignette_quadrants/jumps_map.jpg", map_rarified, height = 4, width = 4)
-
-library(cowplot)
-fig2 <- ggdraw() +
-  draw_plot(optim_plot, 0, .5, 1, .5) +
-  draw_plot(jumps_plot, 0, 0, .5, .5) +
-  draw_plot(map_rarified, .5, 0, .5, .5) +
-  draw_plot_label(c("(A)", "(B)", "(C)"), c(0, 0, 0.5), c(1, 0.5, 0.5), size = 15)
-fig2
-# ggsave("./figures/vignette_quadrants/fig2b.jpg", fig2, height = 10, width = 10)
-
-
-jumps <- plot_grid(jumps_plot, map_rarified, labels=c("A", "B"), ncol = 2, nrow = 1)
-# ggsave("./figures/vignette_quadrants/fig2c.jpg", jumps, height = 5, width = 10)
-
-
-
-
-# Fig 2D: mean dist to the threshold per year
-# run and save Results$Dist
-Thresholds <- read.csv("./exported-data/thresholds.csv")
-Thresholds %<>% filter(rotation_nb == 1) %>% 
-  select(longitude_rounded, latitude_rounded, bio_year, sectors_nb) %>% 
-  rename(sectors = sectors_nb,
-         latitude_threshold = latitude_rounded,
-         longitude_threshold = longitude_rounded)
-Thresholds
-
-# Attribute sectors to each jump: find sector for rotation 0
-Jumps
-Jumps %>% filter(Rarefied == TRUE)
-Jumps_sectors <- attribute_sectors(Jumps, nb_sectors = 20, centroid = c(-75.675340, 40.415240), rotation = 1) 
-Jumps_sectors %<>% select(-c(theta.1, sectors)) %>% rename(sectors = rotation1)
-Jumps_sectors %>% filter(Rarefied == TRUE)
-dim(Jumps_sectors)
-
-# Find corresponding threshold per bio year 
-library(purrr)
-JumpLength <- left_join(Jumps_sectors, Thresholds)
-JumpLength %<>% rowwise() %>%  mutate(DistToThreshold = as.vector(distm(c(longitude_rounded, latitude_rounded), c(longitude_threshold, latitude_threshold), fun = distGeo))/1000)
-
-names(JumpLength)   
-JumpLength_tot <- rbind(JumpLength %>% filter(Rarefied == "Rarefied"),
-                        JumpLength %>% mutate(Rarefied = "Full"))
-
-
-MeanDist_jump <- ggplot() +
-  geom_jitter(data = JumpLength,
-             aes(x = as.factor(bio_year), y = DistToThreshold, 
-                 # col = as.factor(bio_year), 
-                 # fill = as.factor(bio_year),
-                 shape = Rarefied), size = 3, show.legend = F) +
-  scale_alpha_manual(values = c(0.8,0)) +
-  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
-  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  labs(x = "Dataset", y = "Distance to the invasion front (km)") +
-  theme_classic() +
-  theme(legend.position="top", text = element_text(size = 10), plot.tag.position = c(0.01, 1)) +
-  guides(fill = "none", shape = "none", alpha = "none")
-MeanDist_jump
-
-
-
-# Same but boxplots
-
-JumpLength_tot$Rarefied <- factor(JumpLength_tot$Rarefied, levels = c("Rarefied", "Full"))
-MeanDist_jump <- ggplot() +
-  geom_boxplot(data = JumpLength %>% filter(Rarefied == "Rarefied"),
-             aes(x = as.factor(bio_year), y = DistToThreshold, 
-                 col = as.factor(bio_year),
-                 fill = as.factor(bio_year),
-                 alpha = Rarefied)) +
-  scale_alpha_manual(values = c(0.7,0)) +
-  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
-  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  labs(x = "Dataset", y = "Distance to the invasion front (km)") +
-  theme_classic() +
-  theme(legend.position="top", text = element_text(size = 10), plot.tag.position = c(0.01, 1)) +
-  guides(fill = "none", shape = "none", col = "none", alpha = "none")
-MeanDist_jump
-
-JumpLength_tot %>% group_by(Rarefied, bio_year) %>% summarise(mean(DistToThreshold))
-
-summary(aov(DistToThreshold ~ bio_year, data = JumpLength))
-# ggsave("./figures/vignette_quadrants/distv2.jpg", MeanDist_jump, height = 2.5, width = 4)
-
-
-library(cowplot)
-fig2 <- ggdraw() +
-  draw_plot(map_rarified, x = 0, y = .33, width = 1, height = .66) +
-  draw_plot(jumps_plot, 0, 0, .5, .33) +
-  draw_plot(MeanDist_jump, .5, 0, .5, .33) +
-  draw_plot_label(c("(a)", "(b)", "(c)"), c(0, 0, 0.5), c(1, 0.35, 0.35), size = 15) +
-  theme(plot.background = element_rect(fill="#FFFFFF", color = NA))
-fig2
-# ggsave("./figures/vignette_quadrants/fig2h.jpg", fig2, height = 10, width = 10)
-
-
-library(gridExtra)
-lay <- rbind(c(1, 1),
-              c(1, 1),
-              c(2, 3))
-grid.arrange(grobs = list(map_rarified, jumps_plot, MeanDist_jump), 
-             layout_matrix = lay,
-             widths = c(5,5), heights = c(3.33,3.33,3.33))
-
-```
 
 ```{r figure total spread/diffusive spread for slf established, fig.cap = "Evolution of the radius of the invasion over time, when diffusive spread and jump dispersal are separated", echo=FALSE, message = FALSE, eval = F}
 

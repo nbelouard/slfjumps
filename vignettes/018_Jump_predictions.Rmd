@@ -1,9 +1,50 @@
 ---
-title: "Untitled"
+title: "Predictions of the spread of the SLF"
 author: "Nadege Belouard"
 date: "4/21/2022"
 output: html_document
 ---
+
+## Load packages
+```{r load packages}
+library(tidyverse)
+library(sf)
+library(spData)
+library(dplyr)
+library(reshape2)
+library(here)
+library(magrittr)
+
+sf::sf_use_s2(FALSE)
+```
+
+## States map
+```{r states names and centroid for global map, message = FALSE, warning = FALSE, echo = params$display}
+# extracts a map of the States and recodes state labels to show the two-letter code rather than the full state name.
+
+# obtaining simple feature objects for states and finding centroids for label positioning
+states <- sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
+states <- cbind(states, st_coordinates(st_centroid(states)))
+states <- st_transform(states, crs = "ESRI:102010")
+st_crs(states)
+
+# making table key for state 2-letter abbreviations
+# the vectors state.abb and state.name contains strings of all
+# US states and abbreviations
+state_abbr <- tibble(state.name = str_to_lower(state.name), state.abb) %>% 
+  left_join(tibble(ID = states$ID), ., by = c(ID = "state.name")) %>% 
+  mutate(state.abb = replace_na(state.abb, ""))
+
+# adding 2-letter codes to sf
+states$code <- state_abbr$state.abb
+
+# Visualize the data
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+    labs(x = "Longitude", y = "Latitude")
+```
+
+
 # 4. PREDICTIONS
 
 

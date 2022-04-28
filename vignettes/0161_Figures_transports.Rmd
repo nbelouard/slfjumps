@@ -3,39 +3,90 @@ title: "Untitled"
 author: "Nadege Belouard"
 date: "4/11/2022"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
-Map data
-```{r map data}
-# Big map
-surveys <- ggplot(data = states) +
-  geom_sf(fill = "white") +
-  geom_point(data = grid_data,
-             aes(x = longitude_rounded, y = latitude_rounded), col = "gray", size = 1) +
-  geom_sf(data = states, fill = "white", alpha = 0) +
-  labs(x = "Longitude", y = "Latitude") +
-  coord_sf(xlim = c(-90, -70), ylim = c(33, 45)) +
-  theme_classic() +
-  theme(legend.position="bottom", legend.key = element_rect(fill = "white", colour = NA)) 
-surveys
 
-ggsave(file.path(here(), "figures", "points_all.jpg"), surveys, width = 6, height = 6)
+# Setup
+```{r setup for rendering, include = F, messages = F, warning = F}
 
-# Zoomed map
-surveys <- ggplot(data = states) +
-  geom_sf(fill = "white") +
-  geom_point(data = grid_data %>% filter(Status == "Negative surveys"),
-             aes(x = longitude_rounded, y = latitude_rounded, col = Status), size = 0.01) +
-    geom_sf(data = hull, alpha = 0, fill = "white") +
-    geom_point(data = slf_uptodate %>% filter(Status == "Positive surveys"),
-             aes(x = longitude_rounded, y = latitude_rounded, col = Status), size = 0.1) +
-  scale_color_manual(values = c("gray", "black")) +
-  geom_sf(data = states, fill = "white", alpha = 0) +
-  labs(x = "Longitude", y = "Latitude") +
-  coord_sf(xlim = c(-83, -72), ylim = c(37, 44)) +
-  theme_classic() +
-  theme(legend.position="bottom", legend.key = element_rect(fill = "white", colour = NA)) 
+# attaching necessary packages
+library(tidyverse)
+library(magrittr)
+library(sf)
+library(maps)
+library(DescTools)
+library(reshape2)
+library(ggplot2)
+library(here)
+library(slfjumps)
+library(leaflet)
 
-surveys
-
-ggsave(file.path(here(), "figures", "points2.jpg"), surveys, width = 6, height = 6)
+sf::sf_use_s2(FALSE)
 ```
+
+# Load data
+
+
+# Figure 4: boxplot distance to transports
+```{r plot histogram of distances between jumpers, diffusers, undetected, fig.height=5, fig.width = 6, fig.cap="Distance of jumpers, diffusers and non-detections to railroads (top), roads (middle), and airports (bottom). The y axis is truncated to better show the boxes. Refer to section 1 for variables summary."}
+
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"))
+head(slf_uptodate)
+
+#Modify dataset to get distribution of distances with a column for the type of distance (Road, Rail...), and one column for the type of dataset (Full or Rarefied)
+slf_uptodate_long <- slf_uptodate %>% 
+  pivot_longer(cols = starts_with("Dist"), names_to = "DistanceType", values_to = "DistanceValue")
+
+# Order the variables (for plots)
+unique(slf_uptodate_long$Category_full)
+slf_uptodate_long$Category_full <- factor(slf_uptodate_long$Category_full, levels = c("Jumpers", "Diffusers", "Negatives"))
+
+unique(slf_uptodate_long$Category_rare)
+slf_uptodate_long$Category_rare <- factor(slf_uptodate_long$Category_rare, levels = c("Jumpers", "Diffusers", "Negatives"))
+
+slf_uptodate_long$DistanceType <- factor(slf_uptodate_long$DistanceType, levels = c("DistToRoad", "DistToRail", "DistIntRlRd"))
+
+slf_uptodate_long %>% group_by(Category_rare, DistanceType) %>% count()
+
+
+
+# Plot distances (full dataset)
+transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Category_full)) + 
+  geom_boxplot(aes(fill = Category_full), 
+               show.legend = F,
+               # outlier.shape = NA
+               ) +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~DistanceType, scales = "free_y", ncol = 4, 
+             labeller = labeller(DistanceType = 
+    c("DistToRail" = "Railroad",
+      "DistToRoad" = "Major road",
+      "DistIntRlRd" = "Both"))) +
+  # coord_cartesian(ylim=c(0, 16)) +
+  xlab("Category") + ylab("Distance to the nearest... (km)") +
+  theme_classic()
+
+transport_bp
+
+ggsave(file.path(here(), "figures", "jump_transports", "1bis. boxplot transport_fulldata.jpg"), transport_bp, width = 5, height = 3)
+
+
+# Plot distances (rarefied dataset)
+transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Category_rare)) + 
+  geom_boxplot(aes(fill = Category_rare), alpha = 0.5, show.legend = F) +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~DistanceType, scales = "free_y", ncol = 4,
+              labeller = labeller(DistanceType =
+    c("DistToRail" = "Railroad",
+      "DistToRoad" = "Major road",
+      "DistIntRlRd" = "Both"))) +
+  xlab("Category") + ylab("Distance to the nearest... (km)") +
+  theme_classic()
+
+transport_bp
+
+ggsave(file.path(here(), "figures", "jump_transports", "2bis. boxplot transport_rarefieddata.jpg"), transport_bp, width = 5, height = 3)
+
+```
+

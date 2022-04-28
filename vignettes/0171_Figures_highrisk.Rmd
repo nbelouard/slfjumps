@@ -1,0 +1,194 @@
+---
+title: "0171_Figures_highrisk"
+author: "Nadege Belouard"
+date: "4/26/2022"
+output: html_document
+---
+
+# Setup
+```{r setup for rendering, include = F, messages = F, warning = F}
+
+# attaching necessary packages
+library(tidyverse)
+library(magrittr)
+library(sf)
+library(maps)
+library(DescTools)
+library(reshape2)
+library(ggplot2)
+library(here)
+library(slfjumps)
+library(leaflet)
+
+sf::sf_use_s2(FALSE)
+```
+
+# Load data
+
+
+# Figure S3: histograms simulated vs obs
+Load observed data
+```{r load observed data full}
+
+# Convert the observed data to long format, get the average values
+slfPA_uptodate <- read.csv(file.path(here(), "exported-data", "slfPA_uptodate.csv"))
+dim(slf_uptodate)
+
+# Convert to long format
+slfPA_uptodate_long <- slfPA_uptodate %>%
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+
+# Calculate mean and median
+slf_obsmeans <- slfPA_uptodate_long %>% 
+  group_by(Category_full, DistanceType) %>% 
+  summarise(MeanDistance = mean(DistanceValue),
+            MedianDistance = median(DistanceValue))
+
+```
+
+## Full dataset
+Select mean and median for full dataset
+```{r plot null distribution to high risk, fig.height=2, fig.width = 6, fig.cap="Comparison of the distance of jumpers to high-risk areas to a random distribution."}
+
+# Load the simulated values
+Simulations_full <- read.csv(file.path(here(), "exported-data", "slf_sim_full_highrisk.csv"))
+names(Simulations_full)
+head(Simulations_full)
+
+# Convert simulations to long format
+Simulations_full_long <- Simulations_full %>% pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+
+# Select only the means
+# Modify this using by filtering those that contain "means"
+# Simulations_full_long_mean <- Simulations_full_long %>%
+  # filter(DistanceType %in% c("DistToRail_mean", "DistToRoad_mean"))
+Simulations_full_long_mean$DistanceType <- factor(Simulations_full_long_mean$DistanceType, levels = c("DistToRail", "DistToRoad"))
+
+# Select only the medians
+# Modify this using by filtering those that contain "medians"
+# Simulations_full_long_median <- Simulations_full_long %>% filter(DistanceType %in% c("DistToRail_median", "DistToRoad_median"))
+Simulations_full_long_median$DistanceType <- factor(Simulations_full_long_median$DistanceType, levels = c("DistToRail", "DistToRoad"))
+```
+
+Visualize results
+```{r mean and median for observed values}
+
+#Plot means
+random_transport <- ggplot() +
+  geom_histogram(data = Simulations_full_long_mean %>% filter(Category_full == "Jumpers"), 
+                 aes(x =  DistanceValue/1000, y = ..density.., fill = Category_full), binwidth = 0.1) +
+  geom_vline(data = slf_obsmeans %>% filter(Category_full == "Jumpers"),
+             mapping = aes(xintercept = MeanDistance/1000, col = Category_full), size = 1) +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_color_brewer(palette = "Dark2") +
+  xlab("Distance to the nearest... (km)") +
+  ylab("Count (simulations)") +
+  facet_wrap(~DistanceType, ncol = 4, scale = "free") +
+  theme_classic() +
+  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
+
+ggsave(file.path(here(), "figures", "jump_transports", "bootstrap_transports_fullmeans.jpg"), random_transport, width = 10, height = 3)
+
+
+
+# Plot medians
+random_transport <- ggplot() +
+  geom_histogram(data = Simulations_full_long_median %>% filter(Category_full == "Jumpers"), 
+                 aes(x =  DistanceValue/1000, y = ..density.., fill = Category_full), binwidth = 0.1) +
+  geom_vline(data = slf_obsmeans %>% filter(Category_full == "Jumpers"),
+             mapping = aes(xintercept = MedianDistance/1000, col = Category_full), size = 1) +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_color_brewer(palette = "Dark2") +
+  xlab("Distance to the nearest... (km)") +
+  ylab("Count (simulations)") +
+  facet_wrap(~DistanceType, ncol = 4, scale = "free") +
+  theme_classic() +
+  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
+
+random_transport
+
+ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_fullmedianschull_jumpers.jpg"), random_transport, width = 10, height = 3)
+``` 
+
+
+## Rarefied dataset
+
+Calculate mean and median for simulated data
+```{r count simulations rarefied}
+
+# Load the simulated values
+Simulations_rare <- read.csv(file.path(here(), "exported-data", "slf_sim_rarefied_transports.csv"))
+
+# Convert simulations to long format
+Simulations_rare_long <- Simulations_rare %>% pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+Simulations_rare_long %<>% rename(Category_rare = Category_rarefied) 
+Simulations_rare_long$Category_rare <- factor(Simulations_rare_long$Category_rare, levels = c("Jumpers", "Diffusers", "Negatives"))
+
+
+# Select only the means
+Simulations_rare_long_mean <- Simulations_rare_long %>% filter(DistanceType %in% c("DistToRail_mean", "DistToRoad_mean", "DistToAirport_mean", "DistToPort_mean"))
+Simulations_rare_long_mean$DistanceType <- as.factor(Simulations_rare_long_mean$DistanceType)
+levels(Simulations_rare_long_mean$DistanceType)
+levels(Simulations_rare_long_mean$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
+
+# Select only the medians
+Simulations_rare_long_median <- Simulations_rare_long %>% filter(DistanceType %in% c("DistToRail_median", "DistToRoad_median", "DistToAirport_median", "DistToPort_median"))
+Simulations_rare_long_median$DistanceType <- as.factor(Simulations_rare_long_median$DistanceType)
+levels(Simulations_rare_long_median$DistanceType)
+levels(Simulations_rare_long_median$DistanceType) <- c("DistToAirport", "DistToPort", "DistToRail", "DistToRoad")
+```
+
+Visualize results
+```{r visualize rare}
+
+#Plot means
+random_transport <- ggplot() +
+  geom_histogram(data = Simulations_rare_long_mean %>% filter(Category_rare == "Jumpers"), 
+                 aes(x =  DistanceValue/1000, y = ..density.., fill = Category_rare), binwidth = 0.1) +
+  geom_vline(data = slf_obsmeans,
+             mapping = aes(xintercept = MeanDistance/1000, col = Category_rare), size = 1) +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_color_brewer(palette = "Dark2") +
+  xlab("Distance to the nearest... (km)") +
+  ylab("Count (simulations)") +
+  facet_wrap(~Category_rare + DistanceType, ncol = 4, scale = "free") +
+  theme_classic() +
+  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
+
+ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_raremeanschull.jpg"), random_transport, width = 10, height = 9)
+
+
+# Plot median
+random_transport <- ggplot() +
+  geom_histogram(data = Simulations_rare_long_median %>% filter(Category_rare == "Jumpers"), 
+                 aes(x =  DistanceValue/1000, y = ..density.., fill = Category_rare), binwidth = 0.1) +
+  geom_vline(data = slf_obsmeans %>% filter(Category_rare == "Jumpers"),
+             mapping = aes(xintercept = MedianDistance/1000, col = Category_rare), size = 1) +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_color_brewer(palette = "Dark2") +
+  xlab("Distance to the nearest... (km)") +
+  ylab("Count (simulations)") +
+  facet_wrap(~DistanceType, ncol = 4, scale = "free") +
+  theme_classic() +
+  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
+
+ggsave(file.path(here(), "figures", "vignette_transports", "bootstrap_transports_raremedianschull_jumpers.jpg"), random_transport, width = 10, height = 3)
+
+#Same?
+random_highrisk <- ggplot() +
+  geom_histogram(data = randomPA_long_median %>% filter(Category_full == "Jumpers"), aes(x =  DistanceValue/1000, y = ..density.., fill = Category_full), binwidth = 0.1) +
+  geom_vline(data = slfPA_obsmeans %>% filter(Category_full == "Jumpers"), mapping = aes(xintercept = MedianDistance/1000, col = Category_full), size = 1) +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_color_brewer(palette = "Dark2") +
+  xlab("Distance to the nearest... (km)") +
+  ylab("Count (simulations)") +
+  facet_wrap(~DistanceType, ncol = 4, scale = "free") +
+  theme_classic() +
+  guides(col = guide_legend("SLF category"), fill = guide_legend("SLF category"))
+
+  # coord_cartesian(ylim = c(0,1)) +
+  # facet_wrap(~DistanceType, ncol = 3, scale = "free") +
+  # theme_classic()
+
+ggsave(file.path(here(), "figures", "vignette_highrisk", "bootstrap_highrisk_chull_median_full.jpg"), random_highrisk, width = 10, height = 6)
+```
