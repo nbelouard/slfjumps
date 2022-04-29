@@ -42,8 +42,8 @@ attribute_sectors <- function(dataset, nb_sectors = 8, centroid = c(-75.675340, 
     grid_data <- grid_data %>% mutate(thetanew = theta - p*i,
                                       thetanew = ifelse(thetanew < 0, thetanew + 2*pi, thetanew),
                                       sector = ceiling((thetanew)/angle_sector)) %>%
-      dplyr::select(-thetanew) %>% 
-      rename(!!quo_name(paste("rotation", i+1, sep = "")) := sector)
+      dplyr::select(-thetanew)
+    names(grid_data)[which(names(grid_data) == 'sector')] <- paste("rotation", i+1, sep = "")
   }
   
   return(grid_data)
