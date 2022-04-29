@@ -1,0 +1,238 @@
+---
+title: "Predictions of the spread of the SLF"
+author: "Nadege Belouard"
+date: "4/21/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## Load packages
+```{r load packages}
+library(tidyverse)
+library(sf)
+library(spData)
+library(dplyr)
+library(reshape2)
+library(here)
+library(magrittr)
+library(MuMIn)
+# install.packages("AICcmodavg")
+library(AICcmodavg)
+# install.packages("reshape")
+library(reshape)
+library(data.table)
+library(RVAideMemoire)
+
+sf::sf_use_s2(FALSE)
+```
+
+# Load data
+```{r load slf distance data}
+
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"))
+dim(slf_uptodate) #32,911
+head(slf_uptodate)
+
+# Select only positive points
+slf_uptodate %<>% filter(Category_full %in% c("Jumpers", "Diffusers"))
+
+# Prep for full dataset
+slf_uptodate %<>% mutate(Jump_full = ifelse(Category_full == "Jumpers", 1, 0),
+                         Jump_rare = ifelse(Category_rare == "Jumpers", 1, 0))
+```
+
+
+# Binomial model
+
+If there is a SLF, how close will it be from a landscape feature if it's a jump vs a diffuser?
+
+Correlation between predictors
+```{r correlation between predictors}
+
+# Test the correlation between predictors
+cor.test(slf_uptodate$DistToRoad, slf_uptodate$DistToRail) #0.25
+cor.test(slf_uptodate$DistIntRlRd, slf_uptodate$DistToRail) #0.92
+cor.test(slf_uptodate$DistIntRlRd, slf_uptodate$DistToRoad) #0.41
+# Due to the high correlation between railroad and the intersection, we will not put these in the same models
+```
+
+Test the probability of jump with distance from landscape features
+
+## Rail
+
+Run model
+```{r binomial model rail}
+
+# We create a dataset with 1s for jumps, 0s for diffusers.
+# This allows us to test what differs between jumps and diffusers!
+diffusers_full <- slf_uptodate %>% filter(Jump_full == 0)
+jumps_full <- slf_uptodate %>% filter(Jump_full == 1)
+diffusers_rare <- slf_uptodate %>% filter(Jump_rare == 0)
+jumps_rare <- slf_uptodate %>% filter(Jump_rare == 1)
+
+# Define the distances we are interested in.
+# hist(diffusers$DistToRail, breaks = 100) #most distances are below 5 km
+# hist(jumps$DistToRail, breaks = 100) #most distances are below 2 km
+# Create a vector for the values we want to predict
+# DistToRail = seq(0,1000, length.out = 11)
+
+# Because of the difference in sample size between 0s and 1s, we need to resample 0s x 10,000.
+# Create a null object to contain all predictions
+df = NULL
+# Create a null object to contain the estimate coefficient
+# prob = NULL 
+
+for (i in 1:10000){
+  # resample diffusers
+  sample_diffusers_full <- diffusers_full[sample(nrow(diffusers_full), size = dim(jumps_full)[1], replace = FALSE),]
+  # create a subsampled dataset
+  dataset_full <- rbind(jumps_full, sample_diffusers_full)
+  
+    sample_diffusers_rare <- diffusers_rare[sample(nrow(diffusers_rare), size = dim(jumps_rare)[1], replace = FALSE),]
+  # create a subsampled dataset
+  dataset_rare <- rbind(jumps_rare, sample_diffusers_rare)
+  
+  
+  
+  #run the model
+  model_full <- glm(Jump_full ~ DistToRail, data = dataset_full, family = binomial)
+  # modelfull_res <- summary(model_full)
+  model_rare <- glm(Jump_rare ~ DistToRail, data = dataset_rare, family = binomial)
+  # modelrare_res <- summary(model_rare)
+  # p <- modelfull_res$coefficients[2]
+  
+  newdata <- data.frame(DistToRail)
+  newdata %<>% add_column(predictfull = predict(model_full, newdata = newdata, type = "response"),
+                          predictrare = predict(model_rare, newdata = newdata, type = "response"))
+  
+  # prob <- rbind(prob, p)
+  df <- rbind(df, newdata)
+  
+  if(i %% 100 == 0){ print(i) }
+}
+
+head(df)
+dim(df)
+# max(prob)
+# hist(prob)
+# write.csv(prob, "p_jumps_rail.csv", row.names = F)
+write.csv(df, file.path(here(), "exported-data", "prediction_jumps_rail.csv"), row.names = F)
+```
+
+Plot rail predictions
+```{r plot predictions}
+
+prediction_jumps_rail <- ggplot(df) + 
+  geom_point(aes(x = DistToRail, y = predictrare), col = "red") +
+  geom_point(aes(x = DistToRail, y = predictfull), col = "blue") +
+  ylim(c(0,1))+
+  theme_classic() +
+  ylab("Probability for a jumper vs a diffuser") +
+  xlab("Distance to a railroad")
+  
+prediction_jumps_rail
+ggsave(file.path(here(), "figures", "jump_transports", "7. prediction_jumps_rail.jpg"))
+```
+
+Plot rail average predictions
+```{r plot rail average predictions}
+head(df)
+means <- df %>% group_by(DistToRail) %>% 
+  summarise(mean_full = mean(predictfull),
+            mean_rare = mean(predictrare),
+            p975full = quantile(predictfull, 0.975),
+            p025full = quantile(predictfull, 0.025),
+            p975rare = quantile(predictrare, 0.975),
+            p025rare = quantile(predictrare, 0.025))
+
+prediction_jumps_rail <- ggplot(means) + 
+  geom_line(aes(x = DistToRail, y = mean_full), col = "blue") +
+  geom_line(aes(x = DistToRail, y = mean_rare), col = "red") +
+  # geom_point(size = 0.1) +
+  ylim(c(0,1))+
+  theme_classic() +
+    geom_errorbar(aes(x = DistToRail, y = mean_rare, ymin = p025rare, ymax = p975rare), width=.2, col = "red", position=position_dodge(.9)) +
+  geom_errorbar(aes(x = DistToRail, y = mean_full, ymin = p025full, ymax = p975full), width=.2, col = "blue", position=position_dodge(.9)) +
+
+  ylab("Probability for a jumper vs a diffuser") +
+  xlab("Distance to a railroad (m)")
+  
+prediction_jumps_rail
+ggsave(file.path(here(), "figures", "jump_transports", "7bis. prediction_jumps_rail_ic95.jpg"))
+
+```
+
+
+## Road (NOT RUN)
+```{r binomial model road}
+
+hist(slf_uptodate$DistToRoad, breaks = 100)
+
+DistToRoad = seq(0,1000, length.out = 11)
+
+df = NULL
+prob = NULL
+
+for (i in 1:10000){
+  sample_diffusers <- diffusers[sample(nrow(diffusers), size = dim(jumps)[1], replace = FALSE),]
+  dataset <- rbind(jumps, sample_diffusers)
+  
+  model <- glm(Jump_full ~ DistToRoad, data = dataset, family = binomial, na.action = na.fail)
+  model_res <- summary(model)
+  # p <- model_res$coefficients[2]
+  newdata <- data.frame(DistToRoad)
+  newdata %<>% add_column(predict = predict(model, newdata = newdata, type = "response"))
+  # prob <- rbind(prob, p)
+  df <- rbind(df, newdata)
+}
+
+head(df)
+dim(df)
+max(prob)
+hist(prob)
+write.csv(prob, "p_jumps_roads.csv", row.names = F)
+write.csv(df, "prediction_jumps_road.csv", row.names = F)
+```
+
+# Both predictions (NOT RUN)
+```{r both variables in binomial model}
+df_road <- read.csv(file.path(here(), "prediction_jumps_road.csv"))
+df_rail <- read.csv(file.path(here(), "prediction_jumps_rail.csv"))
+
+means_road <- df_road %>% group_by(DistToRoad) %>% 
+  summarise(meanp = mean(p),
+            p975 = quantile(p, 0.975),
+            p025 = quantile(p, 0.025),
+            min = min(p),
+            max = max(p)) %>% 
+    add_column(Transport = "Road") %>% 
+  rename(DistTo = DistToRoad)
+means_road[11,]
+means_rail <- df_rail %>% group_by(DistToRail) %>% 
+  summarise(meanp = mean(p),
+            p975 = quantile(p, 0.975),
+            p025 = quantile(p, 0.025),
+            min = min(p),
+            max = max(p)) %>% 
+  add_column(Transport = "Rail") %>% 
+  rename(DistTo = DistToRail)
+
+means_rail[11,]
+data <- rbind(means_road, means_rail)
+
+
+prediction_jumps <- ggplot() + 
+  geom_line(data = data, aes(x = DistTo, y = meanp, col = Transport)) +
+  geom_point(data = data, aes(x = DistTo, y = meanp, col = Transport), size = 1) +
+    geom_errorbar(data = data, aes(x = DistTo, ymin = p025, ymax = p975, col = Transport), width=.2) +
+  scale_color_manual(values = c("black", "darkgray")) +
+  ylim(c(0,1))+
+  xlim(c(0,2000)) +
+  theme_classic() +
+  ylab("Risk of jump event") +
+  xlab("Distance to... (m)")
+  
+ggsave(file.path(here(), "figures", "vignette_transports", "prediction_jumps_railroad.jpg"), prediction_jumps, width = 6, height = 5)
+       
+```

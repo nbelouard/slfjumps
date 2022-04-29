@@ -1536,3 +1536,7 @@ ggsave(file.path(here(), "figures", "jump_highrisk", "effect_size_rareds.jpg"), 
 
 
 We can visualize the results on Figure 2. The histogram represents the distribution of distances to high-risk areas under the null hypothesis of random dispersal of jumpers. The black vertical lines indicate the significance limits. An observed value situated outside of these vertical lines leads to the rejection of the null hypothesis. The red line indicates the average distance between jumpers and high-risk areas observed in our dataset. The observed location of jumpers is significantly closer than random to high-risk areas.  
+
+In this vignette, we found that:  
+
+(1) Jumpers are situated significantly close to high-risk areas. These high-risk areas could be preferential locations for the progression of the invasion.

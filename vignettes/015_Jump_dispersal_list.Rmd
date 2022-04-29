@@ -102,6 +102,9 @@ table(slf_tiny$bio_year)
 slf_tiny %<>% filter(bio_year %in% c(2014:2020))
 dim(slf_tiny) #324091 rows  
 unique(slf_tiny$state)
+
+head(slf_tiny)
+write.csv(slf_tiny, file.path(here(), "exported-data", "slftiny.csv"), row.names = F)
 ```
 
 
