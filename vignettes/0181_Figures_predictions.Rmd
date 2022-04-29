@@ -1,11 +1,11 @@
 ---
-title: "Untitled"
+title: "Predictions of slf jumps - buffers around landscape features"
 author: "Nadege Belouard"
 date: "4/11/2022"
 output: html_document
 ---
 
-(3) Finally, we will use the knowledge we have on the location of SLF jumpers relative to transports, to project potential areas of colonization over six states (PA, WV, VA, MD, DE, NJ). We will assess the proportion of high-risk locations that are situated in this zone, and whether there are variations between categories of high-risk locations.
+We will use the knowledge we have on the location of SLF jumpers relative to transports, to project potential areas of colonization over six states (PA, WV, VA, MD, DE, NJ). We will assess the proportion of high-risk locations that are situated in this zone, and whether there are variations between categories of high-risk locations.
 
 
 Check the position of jumps relative to these intersects
@@ -404,3 +404,5 @@ ports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
 
 
 \newpage
+
+

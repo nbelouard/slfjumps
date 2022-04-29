@@ -69,7 +69,7 @@ transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Catego
 
 transport_bp
 
-ggsave(file.path(here(), "figures", "jump_transports", "1bis. boxplot transport_fulldata.jpg"), transport_bp, width = 5, height = 3)
+ggsave(file.path(here(), "figures", "jump_transports", "1bis. boxplot transport_fulldata.jpg"), transport_bp, width = 7, height = 2.5)
 
 
 # Plot distances (rarefied dataset)
@@ -86,7 +86,7 @@ transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Catego
 
 transport_bp
 
-ggsave(file.path(here(), "figures", "jump_transports", "2bis. boxplot transport_rarefieddata.jpg"), transport_bp, width = 5, height = 3)
+ggsave(file.path(here(), "figures", "jump_transports", "2bis. boxplot transport_rarefieddata.jpg"), transport_bp, width = 7, height = 2.5)
 
 ```
 
