@@ -39,6 +39,7 @@ library(slfjumps)
 library(leaflet)
 library(purrr)
 library(cowplot)
+library(geosphere)
 
 sf::sf_use_s2(FALSE)
 ```
@@ -350,7 +351,7 @@ Facet 3: mean dist to the threshold per year
 # run and save Results$Dist
 # Thresholds <- read.csv("./exported-data/thresholds.csv")
 Thresholds %<>% filter(rotation_nb == 1) %>% 
-  select(longitude_rounded, latitude_rounded, bio_year, sectors_nb) 
+  dplyr::select(longitude_rounded, latitude_rounded, bio_year, sectors_nb) 
 head(Thresholds)
 
 Thresholds %<>% 
@@ -365,21 +366,31 @@ class(Jumps)
 
 # Jumps %>% filter(Rarefied == "Rarefied")
 Jumps_sectors <- attribute_sectors(Jumps, nb_sectors = 20, centroid = c(-75.675340, 40.415240), rotation = 1) 
-Jumps_sectors %<>% select(-c(theta.1, sectors)) %>%
+Jumps_sectors %<>% dplyr::select(-c(theta.1, sectors)) %>%
   dplyr::rename(sectors = rotation1)
 Jumps_sectors %>% filter(Rarefied == "Rarefied")
 dim(Jumps_sectors)
 
 # Find corresponding threshold per bio year 
 JumpLength <- left_join(Jumps_sectors, Thresholds)
-JumpLength %<>% rowwise() %>%  mutate(DistToThreshold = as.vector(distm(c(longitude_rounded, latitude_rounded), c(longitude_threshold, latitude_threshold), fun = distGeo))/1000)
+JumpLength %<>% rowwise() %>%  mutate(DistToThreshold = as.vector(geosphere::distm(c(longitude_rounded, latitude_rounded), c(longitude_threshold, latitude_threshold), fun = distGeo))/1000)
 
 names(JumpLength)   
 head(JumpLength)
 JumpLength_tot <- rbind(JumpLength %>% filter(Rarefied == "Rarefied"),
                         JumpLength %>% mutate(Rarefied = "Full"))
 
+# Stats
 table(JumpLength_tot$Rarefied)
+max(JumpLength_tot$DistToThreshold) #308.90 km
+
+# Full dataset
+mean(JumpLength_tot$DistToThreshold) #92.15
+quantile(JumpLength_tot$DistToThreshold, 0.95) #240.44 km
+
+# Rare dataset
+mean(JumpLength %>% filter(Rarefied == "Rarefied") %>% pull(DistToThreshold)) #87.56
+quantile(JumpLength %>% filter(Rarefied == "Rarefied") %>% pull(DistToThreshold), 0.95) #262.55 km
 
 
 #Boxplots

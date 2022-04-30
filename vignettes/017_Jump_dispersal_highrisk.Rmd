@@ -169,7 +169,9 @@ unique(Highrisk_proj$type)
 # Mail carriers
 mail <- Highrisk_proj %>% filter(type == "mail carriers")
 mail_buffer <- st_buffer(mail, dist = 50)
+st_write(mail_buffer, file.path(here(), "figures", "GIS", "landscape", "mail_buffer.shp"), append = F)
 dim(mail_buffer) #86
+st_crs(mail_buffer)
 
 ggplot(data = states) +
     geom_sf(data = states, fill = "white") +
@@ -182,6 +184,7 @@ ggplot(data = states) +
 wood <- Highrisk_proj %>% filter(type == "wood")
 dim(wood)
 wood_buffer <- st_buffer(wood, dist = 100)
+st_write(wood_buffer, file.path(here(), "figures", "GIS", "landscape", "wood_buffer.shp"), append = F)
 
 ggplot(data = states) +
     geom_sf(data = states, fill = "white") +
@@ -193,6 +196,7 @@ ggplot(data = states) +
 # Wineries
 wineries <- Highrisk_proj %>% filter(type == "winery")
 wineries_buffer <- st_buffer(wineries, dist = 100)
+st_write(wineries_buffer, file.path(here(), "figures", "GIS", "landscape", "wineries_buffer.shp"), append = F)
 dim(wineries)
 
 ggplot(data = states) +
@@ -206,6 +210,7 @@ ggplot(data = states) +
 # People hobbies
 people <- Highrisk_proj %>% filter(type == "hobbies")
 people_buffer <- st_buffer(people, dist = 100)
+st_write(people_buffer, file.path(here(), "figures", "GIS", "landscape", "people_buffer.shp"), append = F)
 dim(people)
 
 ggplot(data = states) +
@@ -218,7 +223,9 @@ ggplot(data = states) +
 # Garages, Boat, Other
 garages <- Highrisk_proj %>% filter(type == "garages")
 garages_buffer <- st_buffer(garages, dist = 50)
+st_write(garages_buffer, file.path(here(), "figures", "GIS", "landscape", "garages_buffer.shp"), append = F)
 dim(garages)
+st_crs(garages)
 
 ggplot(data = states) +
     geom_sf(data = states, fill = "white") +
@@ -230,6 +237,7 @@ ggplot(data = states) +
 
 boats <- Highrisk_proj %>% filter(type ==  "boat")
 boats_buffer <- st_buffer(boats, dist = 50)
+st_write(boats_buffer, file.path(here(), "figures", "GIS", "landscape", "boats_buffer.shp"), append = F)
 dim(boats)
 
 ggplot(data = states) +

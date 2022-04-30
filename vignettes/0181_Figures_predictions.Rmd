@@ -3,106 +3,321 @@ title: "Predictions of slf jumps - buffers around landscape features"
 author: "Nadege Belouard"
 date: "4/11/2022"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
-We will use the knowledge we have on the location of SLF jumpers relative to transports, to project potential areas of colonization over six states (PA, WV, VA, MD, DE, NJ). We will assess the proportion of high-risk locations that are situated in this zone, and whether there are variations between categories of high-risk locations.
+We will use the knowledge we have on the location of SLF jumps location so far to project potential areas of colonization.
+
+# 1. Setup
+
+## Load packages
+```{r setup for rendering, include = F, messages = F, warning = F}
+
+# attaching necessary packages
+library(tidyverse)
+library(magrittr)
+library(sf)
+library(maps)
+library(DescTools)
+library(reshape2)
+library(ggplot2)
+library(here)
+library(slfjumps)
+library(leaflet)
+library(purrr)
+library(cowplot)
+library(geosphere)
+
+sf::sf_use_s2(FALSE)
+```
+
+## States map
+```{r states names and centroid for global map, message = FALSE, warning = FALSE, echo = params$display}
+# extracts a map of the States and recodes state labels to show the two-letter code rather than the full state name.
+
+# obtaining simple feature objects for states and finding centroids for label positioning
+states <- sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
+# sf::st_as_sf(maps::map("county", plot = TRUE, fill = FALSE))
+states <- cbind(states, st_coordinates(st_centroid(states)))
+states <- st_transform(states, crs = "ESRI:102010")
+
+# making table key for state 2-letter abbreviations
+# the vectors state.abb and state.name contains strings of all
+# US states and abbreviations
+state_abbr <- tibble(state.name = str_to_lower(state.name), state.abb) %>%
+  left_join(tibble(ID = states$ID), ., by = c(ID = "state.name")) %>%
+  mutate(state.abb = replace_na(state.abb, ""))
+
+# adding 2-letter codes to sf
+states$code <- state_abbr$state.abb
 
 
-Check the position of jumps relative to these intersects
+ggplot() +
+    geom_sf(data = states, alpha = 0) +
+  geom_text(data = states, aes(X, Y, label = code), size = 2) 
+
+```
+
+
+
+## Load files
+```{r load datasets for analysis}
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"), h=T)
+slfPA_uptodate <- read.csv(file.path(here(), "exported-data", "slfPA_uptodate.csv"), h=T)
+hull <- st_read(file.path(here(), "figures", "GIS", "chull.shp"), quiet = T)
+st_area(hull) #173,517,523,874 m2 = 173,517 km2
+Thresholds <- read.csv(file.path(here(), "exported-data", "thresholds.csv"))
+```
+
+Map points
+```{r map points}
+
+# take data on all diffusers
+diffusers <- slf_uptodate %>% filter(Category_full == "Diffusers")
+
+diffusers <- st_as_sf(x = diffusers, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F)
+
+# take data on all thresholds/invasion fronts
+head(Thresholds)
+thresholds <- st_as_sf(x = Thresholds %>% filter(bio_year == 2020), coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F) 
+
+# map them
+ggplot(data = states) +
+  geom_sf() +
+  geom_sf(data = diffusers, col = "red") +
+  geom_sf(data = thresholds) +
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+```
+
+# 2. Buffer around invasion front
+We want to create a buffer around the invasion front that represents the predicted zone where jumps can happen, to subset the zone in the US that might be at risk.
+The maximal distance between the invasion front and a jump recorded is 309 km, the distance of 95% of the jumps is 263 km (rarefied dataset), and the average distance is 88 km (rarefied dataset). 
+So we will use a buffer of 263 km.
+
+```{r buffer around invasion front}
+# We first need to create a polyon that represents the invasion front. It's not a minimum convex hull!
+# We do this step on ArcGIS because it is easier than on sf
+invasion_front <- st_read(file.path(here(), "figures", "GIS", "invasion_front.shp"), quiet = T)
+st_crs(invasion_front)
+
+# map that
+ggplot(data = states) +
+  geom_sf() +
+  geom_sf(data = invasion_front, fill = "white") +
+  geom_sf(data = diffusers, col = "red") +
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+# Create a buffer around it
+invasion_front <- st_transform(invasion_front, crs = "ESRI:102010")
+buffer_invasion_front <- st_buffer(invasion_front, dist = 263000)
+
+
+ggplot(data = states) +
+  geom_sf() +
+  geom_sf(data = buffer_invasion_front) +
+  geom_sf(data = diffusers) +
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+# Remove the area that is already colonized
+atrisk_zone <- st_difference(buffer_invasion_front, invasion_front)
+
+# Map it
+ggplot(data = states) +
+  geom_sf() +
+  geom_sf(data = atrisk_zone, fill = "blue", alpha = 0.5) +
+  geom_sf(data = diffusers) +
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+st_write(atrisk_zone, file.path(here(), "figures", "GIS", "atrisk_zone.shp"), append = F)
+```
+
+
+
+# 3. Intersect landscape features and at risk zone
+
+## Load all landscape features
+And create buffer around them
+```{r load landscape features}
+
+# Mail carriers
+mail <- st_read(file.path(here(), "figures", "GIS", "landscape", "mail_buffer.shp"), quiet = T)
+
+# Wood activities
+wood <- st_read(file.path(here(), "figures", "GIS", "landscape", "wood_buffer.shp"), quiet = T)
+
+# Wineries
+wineries <- st_read(file.path(here(), "figures", "GIS", "landscape", "wineries_buffer.shp"), quiet = T)
+
+# People
+people <- st_read(file.path(here(), "figures", "GIS", "landscape", "people_buffer.shp"), quiet = T)
+
+# Garages
+garages <- st_read(file.path(here(), "figures", "GIS", "landscape", "garages_buffer.shp"), quiet = T)
+
+# Boats
+boats <- st_read(file.path(here(), "figures", "GIS", "landscape", "boats_buffer.shp"), quiet = T)
+
+# Airports
+airports <- st_read(file.path(here(), "figures", "GIS", "airports_primary_buffer.shp"), quiet = T)
+airports <- st_transform(airports, crs = "ESRI:102010")
+
+# Rail
+rail <- st_read(file.path(here(), "figures", "GIS", "Railways_full_buffer5m.shp"), quiet = T)
+
+# Road
+road <- st_read(file.path(here(), "figures", "GIS", "road_buffer15m.shp"), quiet = T)
+
+# Intersect of rail and road
+roadrail_intersect <- st_read(file.path(here(), "figures", "GIS", "roadrail100m_union.shp"), quiet = T)
+roadrail_intersect <- st_transform(roadrail_intersect, crs = "ESRI:102010")
+
+```
+
+
+## Intersect all landscape layers with at risk zone
+```{r intersect with at risk zone}
+
+# At risk zone
+atrisk_zone <- st_read(file.path(here(), "figures", "GIS", "atrisk_zone.shp"), quiet = T)
+
+mail_zone <- st_intersection(mail, atrisk_zone) %>% 
+  st_union()
+st_write(mail_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "mail_zone.shp"), quiet = T, append = F)
+
+wood_zone <- st_intersection(wood, atrisk_zone) %>% 
+  st_union()
+st_write(wood_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "wood_zone.shp"), quiet = T, append = F)
+
+wineries_zone <- st_intersection(wineries, atrisk_zone) %>% 
+  st_union()
+st_write(wineries_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "wineries_zone.shp"), quiet = T, append = F)
+
+people_zone <- st_intersection(people, atrisk_zone) %>% 
+  st_union()
+st_write(people_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "people_zone.shp"), quiet = T, append = F)
+
+garages_zone <- st_intersection(garages, atrisk_zone) %>% 
+  st_union()
+st_write(garages_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "garages_zone.shp"), quiet = T, append = F)
+
+boats_zone <- st_intersection(boats, atrisk_zone) %>% 
+  st_union()
+st_write(boats_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "boats_zone.shp"), quiet = T, append = F)
+
+airports_zone <- st_intersection(airports, atrisk_zone) %>% 
+  st_union()
+st_write(airports_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "airports_zone.shp"), quiet = T, append = F)
+
+rail_zone <- st_intersection(rail, atrisk_zone) %>% 
+  st_union()
+st_write(rail_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone.shp"), quiet = T, append = F)
+
+road_zone <- st_intersection(road, atrisk_zone) %>% 
+  st_union()
+st_write(road_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "road_zone.shp"), quiet = T, append = F)
+
+roadrail_intersect_zone <- st_intersection(roadrail_intersect, atrisk_zone) %>% 
+  st_union()
+st_write(roadrail_intersect_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "roadrail_intersect_zone.shp"), quiet = T, append = F)
+
+
+# Map it
+ggplot(data = states) +
+  geom_sf() +
+  geom_sf(data = atrisk_zone, fill = "blue", alpha = 0.5) +
+  geom_sf(data = roadrail_intersect_zone) +
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+```
+
+
+# 4. Create maps!
+
+## Load packages
+```{r setup for rendering, include = F, messages = F, warning = F}
+
+# attaching necessary packages
+library(tidyverse)
+library(magrittr)
+library(sf)
+library(DescTools)
+library(here)
+library(leaflet)
+library(purrr)
+library(geosphere)
+```
+
+## Load data
+```{r load landscape features}
+# Jump data
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"), h=T)
+slfPA_uptodate <- read.csv(file.path(here(), "exported-data", "slfPA_uptodate.csv"), h=T)
+
+# At risk zone
+atrisk_zone <- st_read(file.path(here(), "figures", "GIS", "atrisk_zone.shp"), quiet = T)
+
+mail_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "mail_zone.shp"), quiet = T)
+
+wood_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "wood_zone.shp"), quiet = T)
+
+wineries_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "wineries_zone.shp"), quiet = T)
+
+people_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "people_zone.shp"), quiet = T)
+
+garages_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "garages_zone.shp"), quiet = T)
+
+boats_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "boats_zone.shp"), quiet = T)
+
+airports_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "airports_zone.shp"), quiet = T)
+
+rail_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone.shp"), quiet = T)
+rail_zone <- st_simplify(rail_zone)
+st_write(rail_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone_simple.shp"))
+
+road_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "road_zone.shp"), quiet = T)
+
+roadrail_intersect_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "roadrail_intersect_zone.shp"), quiet = T)
+```
+
+Steps: 
+(0) choose layer and risk level
+(1) calculate distance with risk level
+(2) make buffer with this distance
+
+```{r make landscape layer buffers}
+
+jumps <- slf_uptodate %>% filter(Category_rare == "Jumpers")
+jumpsPA <- slfPA_uptodate %>% filter(Category_rare == "Jumpers")
+jumps <- merge(jumps, jumpsPA, all = T)
+# write.csv(jumps, file.path(here(), "..", "slfjump_app", "data", "jumps.csv"))
+
+dist <- jumps[which(names(jumps) == 'DistToMail')]
+risk = 0.95 
+threshold <- quantile(dist[1], probs = risk, na.rm = T)
+
+buffer <- st_buffer(mail_zone, dist = threshold)
+```
+
+Map it! With leaflet: requires to transform layers to WGS84
 ```{r jumps map}
 
-#load the resulting shapefile
-roadrail_intersect <- st_read(file.path(here(), "figures", "GIS", "roadrail200m_dissolve.shp"), quiet = T)
-roadrail_intersect <- st_read(file.path(here(), "figures", "GIS", "roadrail100m_union.shp"), quiet = T)
+atrisk_zone <- atrisk_zone %>% st_transform(crs = "+proj=longlat +datum=WGS84") 
+buffer <- buffer %>% st_transform(crs = "+proj=longlat +datum=WGS84") 
 
-#load the jumps file
-jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
-
-pal <- colorFactor(rep(rainbow(5), 8), 
-                   domain = unique(jump_groups$Group))
-
-leaflet(data = jump_groups) %>% 
+leaflet(data = buffer) %>% 
   addTiles() %>% 
-  addPolygons(data = roadrail_intersect) %>%
-  addCircleMarkers(lng = ~longitude_rounded, 
-                       lat = ~latitude_rounded, 
-                       color = ~pal(Group), 
-                       label = ~Group)  
+  addPolygons() %>% 
+  # addPolygons(data = rail_zone, col = "black") %>%
+  addPolygons(data = atrisk_zone, fillColor = "red", weight = 0.1)
 
 ```
 
 
-# 3. Intersection of risk zones
 
-If we create a buffer around roads and railways so as to include all jumpers, we can design a map of locations at risk of jump dispersal (Figure 8). In other words, all jump dispersal identified so far occurred within the orange buffer. This type of map can be used to concentrate survey efforts on locations considered at risk based on spread records.
-
-```{r show buffer intersecting road and rail, fig.height=4, fig.width = 6, fig.cap="Buffer zones around railways and roads that include all jumpers"}
-
-max(jumpers_DP16GS15$DistToAirport) #30295.97 m
-quantile(jumpers_DP16GS15$DistToAirport,c(.025,.975))
-
-max(jumpers_DP16GS15$DistToRail) #21189 m
-quantile(jumpers_DP16GS15$DistToRail,c(.025,.975)) #10829 m 
-quantile(jumpers_DP16GS15$DistToRail,c(.05,.95)) # 8391 m
-quantile(jumpers_DP16GS15$DistToRail,c(.1,.9)) # 4889 m
-
-max(jumpers_DP16GS15$DistToRoad) #10360.52 m
-quantile(jumpers_DP16GS15$DistToRoad,c(.025,.975)) #3172 m 
-quantile(jumpers_DP16GS15$DistToRoad,c(.05,.95)) # 2031 m
-quantile(jumpers_DP16GS15$DistToRoad,c(.1,.9)) # 1211 m
-
-railroad <- merge(rail, road)
-
-Buffer_risk <- ggplot(data = world) +
-    geom_sf() +
-    geom_sf(data = states, fill = "white") +
-    geom_sf(data = Railroad_buffer, fill = "orange") +
-    coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
-    labs(x = "Longitude", y = "Latitude")+
-    theme(legend.position="top")
-
-Buffer_risk
-
-# ggsave("../figures/vignette_highrisk/bufferrisk_railroad.jpg", Buffer_risk, width = 6, height = 4)
-```
-
-
-High-risk areas were listed because they concentrate flow of people. It is interesting to see if they are situated in the buffer where actual jump events were found.
-
-```{r show buffer intersecting road and rail with high risk areas, fig.height=4, fig.width = 6, fig.cap="Location of high-risk areas relative to the buffer zones including all jumpers"}
-HighRiskLoc <- st_read("../GIS/HighRiskLoc.shp", quiet = T)
-
-Highrisk_buffer <- ggplot(data = world) +
-    geom_sf() +
-    geom_sf(data = states, fill = "white") +
-    # geom_sf(data = Railroad_buffer, fill = "orange") +
-  geom_sf(data = HighRiskLoc, aes(col = InBuffer)) +
-    coord_sf(xlim = c(-81, -73), ylim = c(38, 42.5), expand = FALSE) +
-    labs(x = "Longitude", y = "Latitude")+
-    theme(legend.position="top")
-
-Highrisk_buffer
-
-# ggsave("../figures/vignette_highrisk/highrisk_buffer.jpg", Highrisk_buffer, width = 6, height = 6)
-```
-
-The green-blue dots represent high-risk area situated within the risk buffer, and red points are high-risk areas outside of this buffer (Figure 9). A substantial proportion of high-risk areas are thus at risk. We can look further into it by checking whether this varies between categories of high-risk areas.
-
-```{r barplot of the proportion of high-risk locations included in risk buffer per category, fig.height=3, fig.width = 9, fig.cap="Proportion of in-buffer high-risk locations per category"}
-
-Prophighrisk_inbuffer <- ggplot(HighRiskLoc, aes(x = category)) + 
-  geom_bar(aes(fill = InBuffer), position="fill") +
-  theme_classic() +
-  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
-
-Prophighrisk_inbuffer
-
-# ggsave("../figures/vignette_highrisk/Prophighrisk_inbuffer.jpg", Prophighrisk_inbuffer, width = 9, height = 3)
-```
-
-We notice on Figure 10 that most campgrounds, race tracks, saw mills and summer camps are situated outside of the risk buffer. It could mean that these locations are generally not at risk compared to the others.
-
-
+## Not run: pre-load buffers for rail and roads
 ```{r buffers around rail and roads}
 # Full dataset
 # Rail
@@ -171,27 +386,6 @@ st_write(Rail_road_rare_75, file.path(here(), "figures", "GIS", "road_rail_inter
 dim(Rail_road_rare_75)
 ```
 
-# Airports, ports
-```{r airports, ports}
-
-## SLF dropped at destination:
-# through people transportation:
-
-# Primary airports (points, buffer radius = 1 000 m)
-# List given by FAA, location given by National Transportation Dataset (USGS)
-airports <- st_read(filepath(here(), "C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Airports/airports_primary_buffer.shp"), quiet = T)
-airports <- st_transform(airports, crs = "ESRI:102010")
-st_crs(airports)
-
-# Through goods transportation:
-# Ports (points, buffer radius = 200 m)
-# These are ports as defined by the USGS ScienceBase-Catalog
-ports <- st_read("C:/Users/labuser/Documents/Postdoc_SLF/SLF_Dispersal/data/raw_data/Transport/Ports/Ports_projected_buffer200.shp", quiet = T)
-st_crs(ports)
-```
-
-
-## Risk buffer
 ```{r map risk buffer}
 
 rail_6570 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_6570.shp"), quiet = T)
@@ -325,84 +519,4 @@ ggsave(file.path(here(), "figures", "GIS_roadrail_75.jpg"), rail, width = 6, hei
 
 aaa
 ```
-
-
-## Are airports and ports far from roads and railroads?
-```{r check distance airports with railroads and roads}
-
-# Calculate the distances to transport infrastructures (from the data frame)
-airports %<>% add_column(DistToRail = NA,
-                         DistToRoad = NA) %>% 
-  st_cast("POLYGON")
-
-# Visualize shapefiles
-ggplot(data = states) +
-    geom_sf(fill = "white") +
-  geom_sf(data = airports, col = "blue") +
-    labs(x = "Longitude", y = "Latitude")+
-    theme(legend.position="top")
-
-
-#Calculate their distance to transport infrastructures
-for (j in 1:length(airports$DistToRail)){ 
-  print(j)
-  point_clip <- st_buffer(airports[j,], dist = 5000)
-  
-  road_clip <- st_intersection(road, point_clip)
-  dist_road <- st_distance(x = airports[j,], y = road_clip)
-  airports$DistToRoad[j] <- min(dist_road)
-  
-  rail_clip <- st_intersection(rail, point_clip)
-  dist_rail <- st_distance(x = airports[j,], y = rail_clip)
-  airports$DistToRail[j] <- min(dist_rail)
-}
-
-airports %>% filter(DistToRail == Inf | is.na(DistToRail))
-airports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
-
-for (j in 1:length(airports$DistToRail)){ 
-  if (airports$DistToRail[j] == Inf){
-    print(j)
-
-    # Calculate distance to the closest railroad
-    dist_rail <- st_distance(x = airports[j,], y = rail)
-    airports$DistToRail[j] <- min(dist_rail)
-  }
-  
-  if (airports$DistToRoad[j] == Inf){
-    print(j)
-
-    # Calculate distance to the closest road
-    dist_road <- st_distance(x = airports[j,], y = road)
-    airports$DistToRoad[j] <- min(dist_road)
-  }
-}
-
-
-## Same for ports
-ports %<>% add_column(DistToRail = NA,
-                      DistToRoad = NA) %>% 
-  st_cast("POLYGON")
-
-for (j in 1:length(ports$DistToRail)){ 
-  print(j)
-  point_clip <- st_buffer(ports[j,], dist = 1000)
-  
-  road_clip <- st_intersection(road, point_clip)
-  dist_road <- st_distance(x = ports[j,], y = road_clip)
-  ports$DistToRoad[j] <- min(dist_road)
-  
-  rail_clip <- st_intersection(rail, point_clip)
-  dist_rail <- st_distance(x = ports[j,], y = rail_clip)
-  ports$DistToRail[j] <- min(dist_rail)
-}
-
-
-ports %>% filter(DistToRail == Inf | is.na(DistToRail))
-ports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
-``` 
-
-
-\newpage
-
 
