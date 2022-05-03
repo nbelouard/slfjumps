@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
+# Determine quadrant
 
 ```{r determine quadrant}
 
@@ -39,6 +39,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
   
 ```
+
+# Calculate threshold graphically
 
 ```{r function to calculate dispersal thresholds GRAPHICALLY}
 
@@ -76,7 +78,7 @@ threshold_jump_graphic <- function(dataset, gap_size = 10) {
 
 ```
 
-
+# Test program
 
 ```{r test of the program}
 
@@ -96,7 +98,7 @@ spread_distances
 
 ```
 
-
+# Calculate dispersal thresholds with actual gap size
 
 ```{r function to calculate dispersal thresholds ACTUAL GAP SIZE}
 
@@ -136,6 +138,7 @@ threshold_jump_numeric <- function(dataset, gap_size = 10) {
 
 ```
 
+# Test program
 
 ```{r test of the program}
 
@@ -155,6 +158,7 @@ spread_distances
 
 ```
 
+# Run for each quadrant and year
 
 ```{r program that runs this function for each quadrant and year}
 
@@ -231,7 +235,7 @@ threshold_jump_multiple_num <- function(dataset,
 
 ``` 
 
-
+# Check if jump is 10 miles further from another jump
 
 ```{r function to check if a jump is 10 miles further than another jump - only FURTHER, cannot be closer to the core}
 
@@ -245,7 +249,7 @@ threshold_jump_multiple_num <- function(dataset,
           
 ```
 
-
+# Sensitivity analysis
 
 ```{r sensitivity analysis}
 
@@ -289,7 +293,7 @@ ggplot(NbJumps, aes(x=Parameters, y=NbJumps, label=Parameters)) +
 
 ```
 
-
+# Map
 
 ```{r map of jumpers gap 10, fig.height=8, fig.width=8}
 
@@ -320,6 +324,7 @@ ggplot(data = world) +
 
 ```
 
+# Sample random points
 
 ```{r sample random points per quadrants}
 
@@ -373,9 +378,7 @@ for (i in 1:5000){
   
 ```
   
-  
-  
-  
+# Run on each quadrant and year
   
 ```{r program that runs this function for each quadrant and year}
 
@@ -456,9 +459,7 @@ threshold_jump_multiple_num <- function(dataset,
 
 ``` 
 
-
-
-
+# Generate a random distribution of points 
 
 ```{r generate a random distribution of points for jumpers, eval = FALSE}
 
@@ -550,6 +551,7 @@ for (k in 1:1){
 
 ```
 
+# Distinguish disk portions
 
 ```{r function: distinguish disk portions, echo = params$display, warnings = FALSE, eval = params$run}
 
@@ -601,7 +603,7 @@ grid_data$newcolname = NA
  
 ```
 
-
+# Subsample diffusers and negatives
 
 ```{r Subsample the name number of diffusers, undetected and total as of jumpers}
 Diffusers_bootstrap <- data.frame(DistToRoad = rep(NA, 10000),
@@ -658,8 +660,6 @@ Total_sample <- NULL
 ```
 
 
-
-
 # 2. Are high-risk areas in high-risk areas relative to transports?
 
 ```{r Distance of HRL sites to transport infrastructures, eval = FALSE}
@@ -698,7 +698,7 @@ Highrisk_proj <- read.csv("../Distances observed/Highrisk_distances.csv")
 ```
 
 
-
+# Boxplot 
 ```{r boxplot of distances between high risk areas and transports, fig.height=3, fig.width = 6, fig.cap="Distance of high-risk areas to transport infrastructures.", message = F}
 
 Highrisk_proj_melt <- melt(Highrisk_proj)
@@ -790,7 +790,7 @@ highrisktoairport_cat
 # ggsave("../figures/vignette_highrisk/highrisktoairport.jpg", highrisktoairport_cat, width = 9, height = 3)
 ```
 
-
+# Find jump clusters
 
 ```{r find points with outbreaks}
 
@@ -858,7 +858,7 @@ Jumps_location$Location <- factor(Jumps_location$Location, levels = c("Harrisbur
 
 
 
-
+# Check Winchester before 2018
 
 
 ```{r check that Winchester was surveyed before 2018}

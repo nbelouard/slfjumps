@@ -274,7 +274,7 @@ Count how long it takes for min number of sectors x rotations
 system.time({slfdata <- attribute_sectors(grid_data, nb_sectors = 20, centroid = centroid, rotation = 3)
   slfdata_long <- slfdata %>%
   pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", values_to = "sectors_nb", names_prefix = "rotation", names_transform = list(rotation_nb = as.integer))
-  Results <- find_jumps(slfdata_long, gap_size = 15, bio_year = c(2014:2020))})
+  Results <- find_jumpstest(slfdata_long, gap_size = 15, bio_year = c(2014:2020))})
 # 25.79 sec
 dim(Results$Jump)[1] #135
 
@@ -735,6 +735,40 @@ spread <- ggplot(data = spread_distances_tab, aes(x = bio_year, y = MaxDist)) +
 
 spread
 ```
+
+
+
+# Yearly radius of the invasion
+
+
+To estimate the spread of the SLF, we extract for each year the radius of the invasion, defined as the maximum distance of a survey with established SLF to the introduction point. Median or mean distances are not informative here because surveys are preferentially conducted towards the invasion front, and thus bias the distribution of distances.
+
+```{r advance of the invasion, fig.cap = "Yearly radius of the invasion", fig.height = 5, fig.width = 9, warning = F, echo = params$display, message = FALSE}
+
+#Computes the maximum distance to the introduction site for each year, status and quadrant
+advance_tab <- grid_data_DP12_rotate0 %>% filter(Status == "Established" & bio_year != 2021) %>%
+  group_by(Status, bio_year, portion_name) %>% 
+  summarise(MaxDist = max(DistToIntro))
+
+# same thing but in a figure
+advance_graph <- ggplot(data = advance_tab, aes(x = bio_year , y = MaxDist)) +
+  geom_bar(stat="identity", fill = "darkgrey", col = "black") +
+  ylab("Invasion radius (km)")+
+  # ylim(c(0,1000)) +
+  xlab("Year") +
+  facet_wrap(~portion_name, ncol = 4) +
+  theme_classic()
+
+advance_graph
+
+```
+
+```{r save graph advance radius, eval = params$savefiles, echo = params$display}
+ggsave("../figures/vignette_quadrants/advance_graph.jpg", advance_graph, width = 8, height = 6)
+```
+
+The invasion radius increased regularly until 2017 (Figure 2). From 2018, there is a steep increase in the invasion radius, especially in the westernmost disk portions, denoting the apparition of dispersal jumps. Note that in 2020, the invasion radius did not increase dramatically, and even decreased in the NNE and ESE portions. This might be due to fewer surveys being conducted that year because of the covid19 pandemic, or be an actual biological pattern. The accuracy of these values can be investigated by checking whether negative surveys are found further than positive surveys, to make sure that SLF were not missed.
+
 
 ## Sectors
 ```{r test run function to attribute sectors, echo = params$display, eval = params$run}

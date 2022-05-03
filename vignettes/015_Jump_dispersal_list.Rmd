@@ -295,6 +295,7 @@ centroid <- c(long = -75.675340, lat = 40.415240)
 
 # Attribute the geographical sector of each point for each rotation
 slfdata <- attribute_sectors(grid_data, nb_sectors = i, centroid = centroid, rotation = initial_number_rotations)
+
 slfdata_long <- slfdata %>% 
   pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", values_to = "sectors_nb", 
                names_prefix = "rotation", names_transform = list(rotation_nb = as.integer))
@@ -302,7 +303,7 @@ slfdata_long <- slfdata %>%
 # Find the jumps
 Results <- find_jumps(slfdata_long, gap_size = 15, bio_year = c(2014:2020))
 
-
+dataset <- slfdata_long
 
 # Run the loop to find the approximate number of sectors recommended
 while (dim(Results$Jump)[1] > Results_prev){
