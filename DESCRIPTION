@@ -17,5 +17,15 @@ Imports:
   here,
   rmarkdown,
   roxygen2,
+  pkgdown,
+  knitr,
+  maps,
+  DescTools,
+  geosphere,
+  leaflet,
+  dplyr, 
+  gridExtra,
+  ape,
+  spdep
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.1.2

@@ -43,7 +43,7 @@ library(magrittr)
 library(sf)
 library(maps)
 library(DescTools)
-library(reshape2)
+# library(reshape2)
 library(geosphere)
 library(ggplot2)
 library(knitr)
@@ -51,7 +51,6 @@ library(here)
 library(slfjumps)
 library(purrr)
 library(leaflet)
-library(randomcoloR)
 
 sf::sf_use_s2(FALSE)
 ```
@@ -447,6 +446,7 @@ Rerun it to save results.
 
 # Right combination:
 optim_sum %>% filter(s == 20, r == 3)
+centroid <- c(-75.675340, 40.415240)
 
 slfdata <- attribute_sectors(grid_data, nb_sectors = 20, centroid = centroid, rotation = 3)
 
