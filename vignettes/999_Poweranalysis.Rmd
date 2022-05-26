@@ -1,0 +1,64 @@
+---
+title: "Power analysis"
+author: "Nadege Belouard"
+date: "5/26/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+Power analysis: how likely are we to find a significant result?
+
+# Setup
+
+Load packages
+```{r setup, message= FALSE, warning = FALSE}
+library(pwr)
+library(here)
+library(magrittr)
+library(dplyr)
+```
+
+Load dataset
+```{r load dataset}
+ModelsRail <- read.csv(file.path(here(), "data", "ModelsRail_full.csv"))
+ModelsRail %<>% dplyr::select(Adj.Rsquared) 
+```
+
+This dataset (10,000 rows) contains the adjusted R2 of 10,000 simulated models of the form:  
+lm(log(Distance to railroad +1) ~ Category of SLF + autocorrelation coefficient, data = dataset)
+
+where category of SLF = jumper, diffuser or negative.  
+
+
+# Power analysis 
+Here is how I ran the power analysis:
+
+Extracted from the pwr vignette:  
+
+> The F test done in an lm has numerator and denominator degrees of freedom. The numerator degrees of freedom, u, is the number of coefficients you will have in your model (minus the intercept). The denominator degrees of freedom, v, is the number of error degrees of freedom: v = n - u - 1. This implies n = v + u + 1.
+
+In our case, in this dataset, we have 135 jumps + 135 diffusers + 135 negatives = 405 individuals
+and we have 3 parameters in the model
+so u = 3 and v = 405 - 3 - 1 = 401
+
+Extracted from the pwr vignette:  
+
+> The effect size, f2, is R2/(1-R2), where R2 is the coefficient of determination, aka the “proportion of variance explained”. To determine effect size you hypothesize the proportion of variance your model explains, or the R2. For example, if I think my model explains 45% of the variance in my dependent variable, the effect size is 0.45/(1 - 0.45) = 0.81.
+
+
+Now let's run the power analysis:
+
+```{r power analysis}
+
+# Calculate the effect size
+R2 = mean(ModelsRail$`Adj.Rsquared`) # R2 = 0.23
+f2 = R2/(1-R2) #0.30
+
+pwr.f2.test(u = 3, 
+            v = 401, 
+            f2 = f2, #effect size
+            sig.level = 0.05, #significance level
+            power = NULL)
+```
+
+Statistical power = 1.
