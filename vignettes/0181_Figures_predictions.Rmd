@@ -92,10 +92,35 @@ ggplot(data = states) +
 
 # 2. Buffer around invasion front
 We want to create a buffer around the invasion front that represents the predicted zone where jumps can happen, to subset the zone in the US that might be at risk.
+
+
+```{r distance to threshold observed}
+DistToThreshold <- read.csv(file.path(here(), "exported-data", "DistToThreshold.csv"))
+head(DistToThreshold)
+
+DistToThreshold %>% group_by(bio_year, Rarefied) %>% summarise(maxdist = max(DistToThreshold),                                                     dist95 = quantile(DistToThreshold, 0.95))
+
+# Rarefied dataset, up to 2020
+Full <- DistToThreshold %>% filter(Rarefied == "Full")
+Rarefied <- DistToThreshold %>% filter(Rarefied == "Rarefied")
+dim(Rarefied)
+max(Rarefied$DistToThreshold) # 307.8 km
+mean(Rarefied$DistToThreshold) # 87.56 km
+quantile(Rarefied$DistToThreshold, 0.95) # 262.55 km
+
+# Rarefied dataset, up to 2019
+Full <- DistToThreshold %>% filter(Rarefied == "Full", bio_year %in% c(2014:2019))
+Rarefied <- DistToThreshold %>% filter(Rarefied == "Rarefied", bio_year %in% c(2014:2019))
+dim(Rarefied)
+max(Rarefied$DistToThreshold) # 307.84
+mean(Rarefied$DistToThreshold) # 87.78 km
+quantile(Rarefied$DistToThreshold, 0.95) # 285.43 km
+```
+
 The maximal distance between the invasion front and a jump recorded is 309 km, the distance of 95% of the jumps is 263 km (rarefied dataset), and the average distance is 88 km (rarefied dataset). 
 So we will use a buffer of 263 km.
 
-```{r buffer around invasion front}
+```{r buffer around invasion front 2020}
 # We first need to create a polyon that represents the invasion front. It's not a minimum convex hull!
 # We do this step on ArcGIS because it is easier than on sf
 invasion_front <- st_read(file.path(here(), "figures", "GIS", "invasion_front.shp"), quiet = T)
@@ -122,16 +147,78 @@ ggplot(data = states) +
 
 # Remove the area that is already colonized
 atrisk_zone <- st_difference(buffer_invasion_front, invasion_front)
+st_crs(atrisk_zone)
 
 # Map it
 ggplot(data = states) +
   geom_sf() +
   geom_sf(data = atrisk_zone, fill = "blue", alpha = 0.5) +
-  geom_sf(data = diffusers) +
+  # geom_sf(data = diffusers) +
   coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
 
 
+# Keep the zone that is on land only!
+US <- st_read(file.path(here(), "figures", "GIS", "gadm36_Cont_USA_county.shp"), crs = "EPSG:4326", quiet = T)
+st_crs(US)
+US <- st_transform(US, crs = "ESRI:102010")
+atrisk_zone <- st_intersection(atrisk_zone, US) %>% st_union()
+
+st_area(atrisk_zone)
+
 st_write(atrisk_zone, file.path(here(), "figures", "GIS", "atrisk_zone.shp"), append = F)
+```
+
+```{r buffer around invasion front 2019}
+# We first need to create a polyon that represents the invasion front. It's not a minimum convex hull!
+# We do this step on ArcGIS because it is easier than on sf
+invasion_front2019 <- st_read(file.path(here(), "figures", "GIS", "invasionfront_2019.shp"), quiet = T)
+st_crs(invasion_front2019)
+
+# map that
+ggplot(data = states) +
+  geom_sf() +
+  geom_sf(data = invasion_front2019, fill = "blue", alpha = 0.5) +
+  # geom_sf(data = invasion_front, fill = "green", alpha= 0.5) +
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+# Create a buffer around it
+invasion_front2019 <- st_transform(invasion_front2019, crs = "ESRI:102010")
+buffer_invasion_front2019 <- st_buffer(invasion_front2019, dist = 285400)
+
+
+ggplot(data = states) +
+  geom_sf() +
+  geom_sf(data = buffer_invasion_front2019) +
+  # geom_sf(data = diffusers) +
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+# Remove the area that is already colonized
+atrisk_zone2019 <- st_difference(buffer_invasion_front2019, invasion_front2019)
+
+# Map it
+ggplot(data = states) +
+  geom_sf() +
+  geom_sf(data = atrisk_zone2019, fill = "blue", alpha = 0.5) +
+  geom_sf(data = atrisk_zone, fill = "green", alpha = 0.5) +
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+# Keep the zone that is on land only!
+US <- st_read(file.path(here(), "figures", "GIS", "gadm36_Cont_USA_county.shp"), crs = "EPSG:4326", quiet = T)
+st_crs(US)
+US <- st_transform(US, crs = "ESRI:102010")
+
+ggplot(data = US) +
+  geom_sf()
+
+atrisk_zone2019 <- st_intersection(atrisk_zone2019, US) %>% st_union()
+
+st_area(atrisk_zone2019)/1e6
+
+st_write(atrisk_zone2019, file.path(here(), "figures", "GIS", "atrisk_zone2019.shp"), append = F)
+
+st_area(atrisk_zone2019)/sum(st_area(US))
+length(st_area(US))
 ```
 
 
@@ -178,6 +265,7 @@ roadrail_intersect <- st_transform(roadrail_intersect, crs = "ESRI:102010")
 
 
 ## Intersect all landscape layers with at risk zone
+For 2020
 ```{r intersect with at risk zone}
 
 # At risk zone
@@ -233,6 +321,54 @@ ggplot(data = states) +
 
 ```
 
+For 2019
+```{r intersect with at risk zone 2019}
+
+# At risk zone
+atrisk_zone2019 <- st_read(file.path(here(), "figures", "GIS", "atrisk_zone2019.shp"), quiet = T)
+
+mail_zone <- st_intersection(mail, atrisk_zone2019) %>% 
+  st_union()
+st_write(mail_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "mail_zone2019.shp"), quiet = T, append = F)
+
+wood_zone <- st_intersection(wood, atrisk_zone2019) %>% 
+  st_union()
+st_write(wood_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "wood_zone2019.shp"), quiet = T, append = F)
+
+wineries_zone <- st_intersection(wineries, atrisk_zone2019) %>% 
+  st_union()
+st_write(wineries_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "wineries_zone2019.shp"), quiet = T, append = F)
+
+people_zone <- st_intersection(people, atrisk_zone2019) %>% 
+  st_union()
+st_write(people_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "people_zone2019.shp"), quiet = T, append = F)
+
+garages_zone <- st_intersection(garages, atrisk_zone2019) %>% 
+  st_union()
+st_write(garages_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "garages_zone2019.shp"), quiet = T, append = F)
+
+boats_zone <- st_intersection(boats, atrisk_zone2019) %>% 
+  st_union()
+st_write(boats_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "boats_zone2019.shp"), quiet = T, append = F)
+
+airports_zone <- st_intersection(airports, atrisk_zone2019) %>% 
+  st_union()
+st_write(airports_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "airports_zone2019.shp"), quiet = T, append = F)
+
+rail_zone <- st_intersection(rail, atrisk_zone2019) %>% 
+  st_union()
+st_write(rail_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone2019.shp"), quiet = T, append = F)
+
+road_zone <- st_intersection(road, atrisk_zone2019) %>% 
+  st_union()
+st_write(road_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "road_zone2019.shp"), quiet = T, append = F)
+
+roadrail_intersect_zone <- st_intersection(roadrail_intersect, atrisk_zone2019) %>% 
+  st_union()
+st_write(roadrail_intersect_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "roadrail_intersect_zone2019.shp"), quiet = T, append = F)
+
+```
+
 
 # 4. Create maps!
 
@@ -251,6 +387,7 @@ library(geosphere)
 ```
 
 ## Load data
+For 2020
 ```{r load landscape features}
 # Jump data
 slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"), h=T)
@@ -273,13 +410,46 @@ boats_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk"
 
 airports_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "airports_zone.shp"), quiet = T)
 
-rail_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone.shp"), quiet = T)
-rail_zone <- st_simplify(rail_zone)
-st_write(rail_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone_simple.shp"))
+rail_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone_simple.shp"), quiet = T)
+# rail_zone <- st_simplify(rail_zone)
+# st_write(rail_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone_simple.shp"))
 
 road_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "road_zone.shp"), quiet = T)
 
 roadrail_intersect_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "roadrail_intersect_zone.shp"), quiet = T)
+```
+
+For 2019
+```{r load landscape features}
+# Jump data
+slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"), h=T)
+slfPA_uptodate <- read.csv(file.path(here(), "exported-data", "slfPA_uptodate.csv"), h=T)
+
+# At risk zone
+atrisk_zone <- st_read(file.path(here(), "figures", "GIS", "atrisk_zone2019.shp"), quiet = T)
+
+
+mail_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "mail_zone2019.shp"), quiet = T)
+
+wood_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "wood_zone2019.shp"), quiet = T)
+
+wineries_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "wineries_zone2019.shp"), quiet = T)
+
+people_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "people_zone2019.shp"), quiet = T)
+
+garages_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "garages_zone2019.shp"), quiet = T)
+
+boats_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "boats_zone2019.shp"), quiet = T)
+
+airports_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "airports_zone2019.shp"), quiet = T)
+
+rail_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone2019.shp"), quiet = T)
+# rail_zone <- st_simplify(rail_zone)
+# st_write(rail_zone, file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "rail_zone_simple2019.shp"))
+
+road_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "road_zone2019.shp"), quiet = T)
+
+roadrail_intersect_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "roadrail_intersect_zone2019.shp"), quiet = T)
 ```
 
 Steps: 
@@ -289,22 +459,51 @@ Steps:
 
 ```{r make landscape layer buffers}
 
-jumps <- slf_uptodate %>% filter(Category_rare == "Jumpers")
-jumpsPA <- slfPA_uptodate %>% filter(Category_rare == "Jumpers")
-jumps <- merge(jumps, jumpsPA, all = T)
+#load the distances
+jumps <- read.csv(file.path(here(), "exported-data", "jumps.csv"))
+dim(jumps)
+jumps_dist <- slf_uptodate %>% filter(Category_full == "Jumpers")
+dim(jumps_dist)
+past_jumps <- jumps %>% left_join(jumps_dist)
+dim(past_jumps)
+jumpsPA_dist <- slfPA_uptodate %>% filter(Category_full == "Jumpers")
+past_jumps <- past_jumps %>% left_join(jumpsPA_dist)
+dim(past_jumps)
+
+past_jumps %<>% filter(bio_year < 2020)
+
+# jumps <- slf_uptodate %>% filter(Category_rare == "Jumpers")
+# jumpsPA <- slfPA_uptodate %>% filter(Category_rare == "Jumpers")
+# jumps <- merge(jumps, jumpsPA, all = T)
 # write.csv(jumps, file.path(here(), "..", "slfjump_app", "data", "jumps.csv"))
 
-dist <- jumps[which(names(jumps) == 'DistToRail')]
-risk = 0.95 
+dist <- past_jumps[which(names(past_jumps) == 'DistIntRlRd')]
+risk = 0.95
 threshold <- quantile(dist[1], probs = risk, na.rm = T)
 
-buffer <- st_buffer(rail_zone, dist = threshold)
-st_area(buffer)/sum(st_area(states))
+buffer <- st_buffer(roadrail_intersect_zone, dist = threshold)
+st_area(buffer)/sum(st_area(US))
+175196000000/sum(st_area(US))
+202499000000/sum(st_area(US))
 
+
+#for 2021
+dist <- jumps_dist[which(names(jumps_dist) == 'DistToRoad')]
+risk = 0.95
+threshold <- quantile(dist[1], probs = risk, na.rm = T)
+
+buffer <- st_buffer(road_zone, dist = threshold)
+st_area(buffer)/1e6
+/sum(st_area(US))
+185024000000/sum(st_area(US)) #rail
+202499000000/sum(st_area(US)) #road
+128462000000/sum(st_area(US)) #intersect
 ```
 
 Map it! With leaflet: requires to transform layers to WGS84
 ```{r jumps map}
+
+st_area(atrisk_zone)/sum(st_area(US))
 
 atrisk_zone <- atrisk_zone %>% st_transform(crs = "+proj=longlat +datum=WGS84") 
 buffer <- buffer %>% st_transform(crs = "+proj=longlat +datum=WGS84") 
@@ -312,213 +511,25 @@ buffer <- buffer %>% st_transform(crs = "+proj=longlat +datum=WGS84")
 leaflet(data = buffer) %>% 
   addTiles() %>% 
   addPolygons() %>% 
-  # addPolygons(data = rail_zone, col = "black") %>%
+  addPolygons(data = rail_zone, col = "black") %>%
   addPolygons(data = atrisk_zone, fillColor = "red", weight = 0.1)
 
 ```
 
+Now add jumps realized in 2020 and see if they are in the predicted high risk zone!
+```{r jumps map}
+
+jumps2020 <- jumps %>% filter(bio_year == 2020)
+jumps2020 <- st_as_sf(x = jumps2020, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F) %>% 
+  st_transform(crs = "+proj=longlat +datum=WGS84") 
 
 
-## Not run: pre-load buffers for rail and roads
-```{r buffers around rail and roads}
-# Full dataset
-# Rail
-rail_21180 <- st_buffer(rail, dist = 21180) #100% jumps
-st_write(rail_21180, file.path(here(), "figures", "GIS", "rail_buffer_21180.shp"))
+leaflet(data = buffer) %>% 
+  addTiles() %>% 
+  addPolygons() %>%
+  addCircles(data = jumps2020, ~longitude_rounded, ~latitude_rounded, 
+             color = "red", fillColor = "red", fillOpacity = 0.7
+             ) #%>%
+  addPolygons(data = atrisk_zone, fillColor = "red", weight = 0.1)
 
-rail_6570 <- st_buffer(rail, dist = 6570) #95% jumps
-st_write(rail_6570, file.path(here(), "figures", "GIS", "rail_buffer_6570.shp"))
-
-rail_1340 <- st_buffer(rail, dist = 1340) #75% jumps
-st_write(rail_1340, file.path(here(), "figures", "GIS", "rail_buffer_1340.shp"))
-
-
-# Rarefied dataset
-rail_9790 <- st_buffer(rail, dist = 9790) #100% jumps
-st_write(rail_9790, file.path(here(), "figures", "GIS", "rail_buffer_9790.shp"))
-
-rail_7120 <- st_buffer(rail, dist = 7120) #95% jumps
-st_write(rail_7120, file.path(here(), "figures", "GIS", "rail_buffer_7120.shp"))
-
-rail_2590 <- st_buffer(rail, dist = 2590) #75% jumps
-st_write(rail_2590, file.path(here(), "figures", "GIS", "rail_buffer_2590.shp"))
-
-# Road
-road_3570 <- st_buffer(road, dist = 3570) #100% jumps
-st_write(road_3570, file.path(here(), "figures", "GIS", "road_buffer_3570.shp"))
-
-road_1810 <- st_buffer(road, dist = 1810) #95% jumps
-st_write(road_1810, file.path(here(), "figures", "GIS", "road_buffer_1810.shp"))
-
-road_730 <- st_buffer(road, dist = 730) #75% jumps
-st_write(road_730, file.path(here(), "figures", "GIS", "road_buffer_730.shp"))
-
-
-# Rarefied dataset
-road_3370 <- st_buffer(road, dist = 3370) #100% jumps
-st_write(road_3370, file.path(here(), "figures", "GIS", "road_buffer_3370.shp"))
-
-road_2970 <- st_buffer(road, dist = 2970) #95% jumps
-st_write(road_2970, file.path(here(), "figures", "GIS", "road_buffer_2970.shp"))
-
-road_980 <- st_buffer(road, dist = 980) #75% jumps
-st_write(road_980, file.path(here(), "figures", "GIS", "road_buffer_980.shp"))
-
-
-# Intersections
-# Full dataset
-Rail_road_full_100 <- st_intersection(rail_21180, road_3570)
-st_write(Rail_road_full_100, file.path(here(), "figures", "GIS", "road_rail_intersect_full_100.shp"))
-
-Rail_road_full_95 <- st_intersection(rail_6570, road_1810)
-st_write(Rail_road_full_95, file.path(here(), "figures", "GIS", "road_rail_intersect_full_95.shp"))
-
-Rail_road_full_75 <- st_intersection(rail_1340, road_730)
-st_write(Rail_road_full_75, file.path(here(), "figures", "GIS", "road_rail_intersect_full_75.shp"))
-
-# Rare dataset
-Rail_road_rare_100 <- st_intersection(rail_9790, road_3370)
-st_write(Rail_road_rare_100, file.path(here(), "figures", "GIS", "road_rail_intersect_rare_100.shp"))
-
-Rail_road_rare_95 <- st_intersection(rail_7120, road_2970)
-st_write(Rail_road_rare_95, file.path(here(), "figures", "GIS", "road_rail_intersect_rare_95.shp"))
-
-Rail_road_rare_75 <- st_intersection(rail_2590, road_980)
-st_write(Rail_road_rare_75, file.path(here(), "figures", "GIS", "road_rail_intersect_rare_75.shp"))
-dim(Rail_road_rare_75)
 ```
-
-```{r map risk buffer}
-
-rail_6570 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_6570.shp"), quiet = T)
-
-
-# Visualize shapefiles
-rail <- ggplot(data = states) +
-    geom_sf(data = states, fill = "white") +
-  geom_sf(data = rail_6570, fill = "orange", col = "orange") +
-  geom_sf(data = states, alpha = 0) +
-    labs(x = "Longitude", y = "Latitude")+
-    theme(legend.position="top") +
-    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
-  coord_sf(xlim = c(500000, 2000000), 
-           ylim = c(-900000, 700000))
-
-ggsave(file.path(here(), "figures", "GIS_rail_6570.jpg"), rail, width = 6, height = 6)
-
-
-####
-
-
-rail_1340 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_1340.shp"), quiet = T)
-
-
-# Visualize shapefiles
-rail <- ggplot(data = states) +
-    geom_sf(data = states, fill = "white") +
-  geom_sf(data = rail_1340, fill = "orange", col = "orange") +
-  geom_sf(data = states, alpha = 0) +
-    labs(x = "Longitude", y = "Latitude")+
-    theme(legend.position="top") +
-    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
-  coord_sf(xlim = c(500000, 2000000), 
-           ylim = c(-900000, 700000))
-
-ggsave(file.path(here(), "figures", "GIS_rail_1340.jpg"), rail, width = 6, height = 6)
-
-
-
-####
-
-
-rail_21180 <- st_read(file.path(here(), "figures", "GIS", "rail_buffer_21180.shp"), quiet = T)
-
-
-# Visualize shapefiles
-rail <- ggplot(data = states) +
-    geom_sf(data = states, fill = "white") +
-  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
-    geom_sf(data = rail_6570, fill = "orange", col = "orange") +
-    geom_sf(data = rail_1340, fill = "red", col = "red") +
-  geom_sf(data = states, alpha = 0) +
-    labs(x = "Longitude", y = "Latitude")+
-    theme(legend.position="top") +
-    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
-  coord_sf(xlim = c(500000, 2000000), 
-           ylim = c(-900000, 700000))
-
-ggsave(file.path(here(), "figures", "GIS_rail_95_75.jpg"), rail, width = 6, height = 6)
-
-
-
-
-### roads
-
-####
-
-
-road_1810 <- st_read(file.path(here(), "figures", "GIS", "road_buffer_1810.shp"), quiet = T)
-
-
-# Visualize shapefiles
-rail <- ggplot(data = states) +
-    geom_sf(data = states, fill = "white") +
-  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
-    # geom_sf(data = rail_6570, fill = "orange", col = "orange") +
-    geom_sf(data = road_1810, fill = "orange", col = "orange") +
-  geom_sf(data = states, alpha = 0) +
-    labs(x = "Longitude", y = "Latitude")+
-    theme(legend.position="top") +
-    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
-  coord_sf(xlim = c(500000, 2000000), 
-           ylim = c(-900000, 700000))
-
-ggsave(file.path(here(), "figures", "GIS_road_1810.jpg"), rail, width = 6, height = 6)
-
-
-
-### 
-
-road_730 <- st_read(file.path(here(), "figures", "GIS", "road_buffer_730.shp"), quiet = T)
-
-
-# Visualize shapefiles
-rail <- ggplot(data = states) +
-    geom_sf(data = states, fill = "white") +
-  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
-    # geom_sf(data = rail_6570, fill = "orange", col = "orange") +
-    geom_sf(data = road_730, fill = "orange", col = "orange") +
-  geom_sf(data = states, alpha = 0) +
-    labs(x = "Longitude", y = "Latitude")+
-    theme(legend.position="top") +
-    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
-  coord_sf(xlim = c(500000, 2000000), 
-           ylim = c(-900000, 700000))
-
-ggsave(file.path(here(), "figures", "GIS_road_730.jpg"), rail, width = 6, height = 6)
-
-
-
-## intersect
-
-road_rail_75 <- st_read(file.path(here(), "figures", "GIS", "road_rail_intersect_full_75.shp"), quiet = T)
-
-
-# Visualize shapefiles
-rail <- ggplot(data = states) +
-    geom_sf(data = states, fill = "white") +
-  # geom_sf(data = rail_21180, fill = "yellow", col = "yellow") +
-    # geom_sf(data = rail_6570, fill = "orange", col = "orange") +
-    geom_sf(data = road_rail_75, fill = "orange", col = "orange") +
-  geom_sf(data = states, alpha = 0) +
-    labs(x = "Longitude", y = "Latitude")+
-    theme(legend.position="top") +
-    # coord_sf(xlim = c(-90, -70), ylim = c(30, 45))
-  coord_sf(xlim = c(500000, 2000000), 
-           ylim = c(-900000, 700000))
-
-ggsave(file.path(here(), "figures", "GIS_roadrail_75.jpg"), rail, width = 6, height = 6)
-
-aaa
-```
-
