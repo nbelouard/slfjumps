@@ -39,6 +39,7 @@ library(slfjumps)
 library(leaflet)
 library(purrr)
 library(geosphere)
+library(cowplot)
 
 sf::sf_use_s2(FALSE)
 ```
@@ -294,7 +295,9 @@ Facet 1: map
 ```{r load dataset, eval = F}
 
 centroid <- c(-75.675340, 40.415240)
-
+Jumps_fig1 <- Jumps %>% mutate(Rarefied = recode(Rarefied,
+                                                 "Rarefied" = "Isolated",
+                                                 "Full" = "Clustered"))
 
 # Map it
 map_rarified <- ggplot(data = grid_data) +
@@ -303,11 +306,11 @@ map_rarified <- ggplot(data = grid_data) +
     geom_sf(data = states, alpha = 0) +
     geom_point(data = grid_data, aes(x = centroid[1], y = centroid[2]), col = "black", shape = 4, size = 5) +
   coord_sf(xlim = c(-81, -73), ylim = c(38, 43)) +
-  geom_point(data = Jumps,
+  geom_point(data = Jumps_fig1,
              aes(x = longitude_rounded, y = latitude_rounded, 
-                 col = as.factor(bio_year), group = Rarefied, stroke = Rarefied, shape = Rarefied), size = 4) +
-  scale_discrete_manual(aesthetics = "stroke", values = c('Rarefied' = 1, 'Full' = 2)) +
-  scale_discrete_manual(aesthetics = "shape", values = c('Rarefied' = 19, 'Full' = 21)) +
+                 col = as.factor(bio_year), group = Rarefied, stroke = Rarefied, shape = Rarefied), size = 3) +
+  scale_discrete_manual(aesthetics = "stroke", values = c('Isolated' = 1, 'Clustered' = 1)) +
+  scale_discrete_manual(aesthetics = "shape", values = c('Isolated' = 21, 'Clustered' = 19)) +
   scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
   scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
   scale_alpha_manual(values = c(0.5, 1)) +
@@ -315,33 +318,37 @@ map_rarified <- ggplot(data = grid_data) +
   theme(legend.position="right", text = element_text(size = 10),
         panel.background = element_rect(fill = "white"),
         legend.key = element_rect(fill = "white")) +
-   guides(shape = guide_legend("Dataset"), stroke = guide_legend("Dataset"), colour = guide_legend("Biological year"), alpha = guide_legend("Dataset"), fill = guide_legend("Biological year"))
+   guides(shape = guide_legend("Jumps"), stroke = guide_legend("Jumps"), colour = guide_legend("Year"), alpha = guide_legend("Jumps"), fill = guide_legend("Year"))
 
 map_rarified
 
-ggsave(file.path(here(), "figures", "manuscript figures", "3. jumps_map.jpg"), map_rarified, height = 8, width = 8)
+ggsave(file.path(here(), "figures", "manuscript figures", "3. jumps_map_v2.jpg"), map_rarified, height = 8, width = 8)
 ```
 
 Facet 2: number of jumps per year
 ```{r number of jumps per year}
-#2nd version with colors
-Jumps_year <- Jumps %>% group_by(bio_year, Rarefied) %>% summarise(n = n())
-Jumps$Rarefied <- factor(Jumps$Rarefied, levels = c( "Rarefied", "Full"))
+
+Jumps_fig1 <- Jumps %>% mutate(Rarefied = recode(Rarefied,
+                                                 "Rarefied" = "Isolated",
+                                                 "Full" = "Clustered"))
+
+Jumps_year <- Jumps_fig1 %>% group_by(bio_year, Rarefied) %>% summarise(n = n())
+Jumps_fig1$Rarefied <- factor(Jumps_fig1$Rarefied, levels = c( "Clustered", "Isolated"))
  
 jumps_plot <- ggplot() +
   geom_bar(data = Jumps_year, aes(x = bio_year, y = n, fill = as.factor(bio_year), group = Rarefied, col = as.factor(bio_year), alpha = Rarefied), stat = "identity", lwd = .25) +
   scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
   scale_alpha_manual(values = c(0, 1)) +
   scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  xlab("Biological year") +
+  xlab("Year") +
   ylab("Number of jumps") +
   theme_classic() +
-  guides(alpha = "none", fill = "none", col = "none") +
-  theme(text = element_text(size = 10), legend.position = "top")
+  guides(alpha = guide_legend("Jumps"), fill = "none", col = "none") +
+  theme(text = element_text(size = 10), legend.position = "right")
 
 jumps_plot
 
-ggsave(file.path(here(), "figures", "manuscript figures", "3. number of jumps.jpg"), jumps_plot, height = 2.5, width = 4)
+ggsave(file.path(here(), "figures", "manuscript figures", "3. number of jumps_v2.jpg"), jumps_plot, height = 2.5, width = 4)
 ```
 
 
@@ -362,6 +369,7 @@ head(Thresholds)
 # Attribute sectors to each jump: find sector for rotation 0
 head(Jumps)
 class(Jumps)
+Jumps$Rarefied <- factor(Jumps$Rarefied, levels = c( "Rarefied", "Full"))
 
 # Jumps %>% filter(Rarefied == "Rarefied")
 Jumps_sectors <- attribute_sectors(Jumps, nb_sectors = 20, centroid = c(-75.675340, 40.415240), rotation = 1) 
@@ -404,7 +412,7 @@ MeanDist_jump <- ggplot() +
   scale_alpha_manual(values = c(0.7,0)) +
   scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
   scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  labs(x = "Dataset", y = "Distance to the invasion front (km)") +
+  labs(x = "Dataset", y = "Distance from the invasion front (km)") +
   theme_classic() +
   theme(legend.position="top", text = element_text(size = 10), plot.tag.position = c(0.01, 1)) +
   guides(fill = "none", shape = "none", col = "none", alpha = "none")
@@ -440,7 +448,7 @@ fig2 <- ggdraw() +
 
 fig2
 
-ggsave(file.path(here(), "figures", "manuscript figures", "3. jump description.jpg"), fig2, height = 10, width = 10)
+ggsave(file.path(here(), "figures", "manuscript figures", "3. jump description_v2.jpg"), fig2, height = 10, width = 10)
 
 ```
 
