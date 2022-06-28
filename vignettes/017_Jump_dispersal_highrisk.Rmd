@@ -1322,7 +1322,7 @@ slf_uptodate_long <- slf_uptodate %>%
 
 # Calculate mean and median for full dataset
 slf_obsmeans_full <- slfPA_uptodate_long %>%
-  filter(Category_full == "Jumpers") %>% 
+  filter(Category_full == "Negatives") %>% 
   group_by(Category_full, DistanceType) %>% 
   summarise(MeanDistance = mean(DistanceValue),
             MedianDistance = median(DistanceValue))
@@ -1338,7 +1338,7 @@ slf_obsmeans_full <- rbind(slf_obsmeans_full, slftrans_obsmeans_full)
 
 # Calculate mean and median for rarefied dataset
 slf_obsmeans_rarefied <- slfPA_uptodate_long %>%
-  filter(Category_rare == "Jumpers") %>% 
+  filter(Category_rare == "Diffusers") %>% 
   group_by(Category_rare, DistanceType) %>% 
   summarise(MeanDistance = mean(DistanceValue),
             MedianDistance = median(DistanceValue))
@@ -1548,3 +1548,490 @@ We can visualize the results on Figure 2. The histogram represents the distribut
 In this vignette, we found that:  
 
 (1) Jumpers are situated significantly close to high-risk areas. These high-risk areas could be preferential locations for the progression of the invasion.
+
+
+# 8. Difference with diffusers and negatives
+## Full dataset
+```{r lm with ac, echo = FALSE}
+library(spdep)
+
+ModelsAirports = NULL
+ModelsPorts = NULL
+ModelsGarages = NULL
+ModelsMail = NULL
+ModelsWood = NULL
+ModelsWineries = NULL
+ModelsHobbies = NULL
+
+# Define the datasets
+Diffusers_full <- slfPA_uptodate %>% filter(Category_full == "Diffusers")
+Negatives_full <- slfPA_uptodate %>% filter(Category_full == "Negatives")
+Jumpers_full <- slfPA_uptodate %>% filter(Category_full == "Jumpers")
+njumpers_full = dim(Jumpers_full)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), size = njumpers_full, replace = FALSE),]
+  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), size = njumpers_full, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_full, Diffusers_full_sample
+  , Negatives_full_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## 1. Model for airports distance:
+  # Calculate ac coefficients
+  ac_airports <- autocov_dist(dataset$DistToAirports, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_airports)){ print("Error AC rail")}
+  dataset %<>% add_column(ac_airports = ac_airports)
+  # Run model
+  modAirports_ac <- lm(log(DistToAirports+1) ~ Category_full + ac_airports, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modAirportsac <- summary(modAirports_ac)
+  ModelsAirports <- rbind(ModelsAirports, 
+                      c(summary_modAirportsac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                      summary_modAirportsac$r.squared, 
+                      summary_modAirportsac$adj.r.squared)) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  
+  ## 2. Model for cars distance:
+  # Calculate ac coefficients
+  ac_garages <- autocov_dist(dataset$DistToGarages, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_garages)){ print("Error AC garages")}
+  dataset %<>% add_column(ac_garages = ac_garages)
+  # Run model
+  modGarages_ac <- lm(log(DistToGarages+1) ~ Category_full + ac_garages, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modGaragesac <- summary(modGarages_ac)
+  ModelsGarages <- rbind(ModelsGarages, 
+                      c(summary_modGaragesac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                      summary_modGaragesac$r.squared, 
+                      summary_modGaragesac$adj.r.squared)) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  
+    ## 3. Model for mail/package carriers:
+  # Calculate ac coefficients
+  ac_mail <- autocov_dist(dataset$DistToMail, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_mail)){ print("Error AC mail")}
+  dataset %<>% add_column(ac_mail = ac_mail)
+  # Run model
+  modMail_ac <- lm(log(DistToMail+1) ~ Category_full + ac_mail, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modMailac <- summary(modMail_ac)
+  ModelsMail <- rbind(ModelsMail, 
+                     c(summary_modMailac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                       summary_modMailac$r.squared, 
+                       summary_modMailac$adj.r.squared))
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  ## 4. Model for natural products industry = wood related activities:
+  # Calculate ac coefficients
+  ac_wood <- autocov_dist(dataset$DistToWood, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_wood)){ print("Error AC wood")}
+  dataset %<>% add_column(ac_wood = ac_wood)
+  # Run model
+  modWood_ac <- lm(log(DistToWood+1) ~ Category_full + ac_wood, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modWoodac <- summary(modWood_ac)
+  ModelsWood <- rbind(ModelsWood, 
+                     c(summary_modWoodac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                       summary_modWoodac$r.squared, 
+                       summary_modWoodac$adj.r.squared))
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  
+  ## 5. Model for wineries:
+  # Calculate ac coefficients
+  ac_wineries <- autocov_dist(dataset$DistToWineries, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_wineries)){ print("Error AC wineries")}
+  dataset %<>% add_column(ac_wineries = ac_wineries)
+  # Run model
+  modWineries_ac <- lm(log(DistToWineries+1) ~ Category_full + ac_wineries, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modWineriesac <- summary(modWineries_ac)
+  ModelsWineries <- rbind(ModelsWineries, 
+                     c(summary_modWineriesac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                       summary_modWineriesac$r.squared, 
+                       summary_modWineriesac$adj.r.squared))
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  ## 6. Model for popular gathering sites = hobbies:
+  # Calculate ac coefficients
+  ac_hobbies <- autocov_dist(dataset$DistToHobbies, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_hobbies)){ print("Error AC hobbies")}
+  dataset %<>% add_column(ac_hobbies = ac_hobbies)
+  # Run model
+  modHobbies_ac <- lm(log(DistToHobbies+1) ~ Category_full + ac_hobbies, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modHobbiesac <- summary(modHobbies_ac)
+  ModelsHobbies <- rbind(ModelsHobbies, 
+                     c(summary_modHobbiesac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                       summary_modHobbiesac$r.squared, 
+                       summary_modHobbiesac$adj.r.squared))
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+
+ModelsAirports <- data.frame(ModelsAirports)
+names(ModelsAirports) = c("Int_est", "DJ_est", "DN_est", 
+                      "AC_est",
+                      "Intp", "DJp", "DNp", 
+                      "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsAirports, file.path(here(), "tables", "ModelsAirports_full.csv"), row.names = F)
+
+
+ModelsGarages <- data.frame(ModelsGarages)
+names(ModelsGarages) = c("Int_est", "DJ_est", "DN_est", 
+                      "AC_est",
+                      "Intp", "DJp", "DNp", 
+                      "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsGarages, file.path(here(), "tables", "ModelsGarages_full.csv"), row.names = F)
+
+
+ModelsMail <- data.frame(ModelsMail)
+names(ModelsMail) = c("Int_est", "DJ_est", "DN_est", 
+                     "AC_est",
+                      "Intp", "DJp", "DNp", 
+                     "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsMail, file.path(here(), "tables", "ModelsMail_full.csv"), row.names = F)
+
+
+ModelsWood <- data.frame(ModelsWood)
+names(ModelsWood) = c("Int_est", "DJ_est", "DN_est", 
+                     "AC_est",
+                      "Intp", "DJp", "DNp", 
+                     "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsWood, file.path(here(), "tables", "ModelsWood_full.csv"), row.names = F)
+
+
+ModelsWineries<- data.frame(ModelsWineries)
+names(ModelsWineries) = c("Int_est", "DJ_est", "DN_est", 
+                     "AC_est",
+                      "Intp", "DJp", "DNp", 
+                     "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsWineries, file.path(here(), "tables", "ModelsWineries_full.csv"), row.names = F)
+
+
+ModelsHobbies <- data.frame(ModelsHobbies)
+names(ModelsHobbies) = c("Int_est", "DJ_est", "DN_est", 
+                     "AC_est",
+                      "Intp", "DJp", "DNp", 
+                     "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsHobbies, file.path(here(), "tables", "ModelsHobbies_full.csv"), row.names = F)
+
+```
+
+
+Visualize full dataset
+```{r visualize full DistToRail data}
+ModelsAirports <- read.csv(file.path(here(), "tables",  "ModelsAirports_full.csv"))
+
+ModelsAirports %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DNsignif)
+#DJ: S = 8678 --> p = 0.13
+
+
+ModelsGarages <- read.csv(file.path(here(), "tables",  "ModelsGarages_full.csv"))
+
+ModelsGarages %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DNsignif)
+#DJ: S = 7726 --> no
+
+
+ModelsMail <- read.csv(file.path(here(), "tables",  "ModelsMail_full.csv"))
+
+ModelsMail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DNsignif)
+#DJ: S = 9562 --> no
+
+
+
+ModelsWood <- read.csv(file.path(here(), "tables",  "ModelsWood_full.csv"))
+
+ModelsWood %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+#DJ: S = 61 --> no
+
+
+ModelsWineries <- read.csv(file.path(here(), "tables",  "ModelsWineries_full.csv"))
+
+ModelsWineries %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+#DJ: S = 6347 --> no
+
+
+ModelsHobbies <- read.csv(file.path(here(), "tables",  "ModelsHobbies_full.csv"))
+
+ModelsHobbies %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+#DJ: S = 2178 --> no
+```
+
+
+## Rarefied dataset 
+```{r lm with ac, echo = FALSE}
+library(spdep)
+
+ModelsAirports = NULL
+ModelsPorts = NULL
+ModelsGarages = NULL
+ModelsMail = NULL
+ModelsWood = NULL
+ModelsWineries = NULL
+ModelsHobbies = NULL
+
+# Define the datasets
+Diffusers_rare <- slfPA_uptodate %>% filter(Category_rare == "Diffusers")
+Negatives_rare <- slfPA_uptodate %>% filter(Category_rare == "Negatives")
+Jumpers_rare <- slfPA_uptodate %>% filter(Category_rare == "Jumpers")
+njumpers_rare = dim(Jumpers_rare)
+
+
+for (i in 1:10000){
+  # One iteration
+  # Sample diffusers and negatives
+  Diffusers_rare_sample <- Diffusers_rare[sample(nrow(Diffusers_rare), size = njumpers_rare, replace = FALSE),]
+  Negatives_rare_sample <- Negatives_rare[sample(nrow(Negatives_rare), size = njumpers_rare, replace = FALSE),]
+  
+  # Make a new dataset
+  dataset <- rbind(Jumpers_rare, Diffusers_rare_sample
+  , Negatives_rare_sample)
+  
+  #Make a matrix of coordinates 
+  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  
+  ## 1. Model for airports distance:
+  # Calculate ac coefficients
+  ac_airports <- autocov_dist(dataset$DistToAirports, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_airports)){ print("Error AC rail")}
+  dataset %<>% add_column(ac_airports = ac_airports)
+  # Run model
+  modAirports_ac <- lm(log(DistToAirports+1) ~ Category_rare + ac_airports, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modAirportsac <- summary(modAirports_ac)
+  ModelsAirports <- rbind(ModelsAirports, 
+                      c(summary_modAirportsac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                      summary_modAirportsac$r.squared, 
+                      summary_modAirportsac$adj.r.squared)) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  
+  ## 2. Model for cars distance:
+  # Calculate ac coefficients
+  ac_garages <- autocov_dist(dataset$DistToGarages, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_garages)){ print("Error AC garages")}
+  dataset %<>% add_column(ac_garages = ac_garages)
+  # Run model
+  modGarages_ac <- lm(log(DistToGarages+1) ~ Category_rare + ac_garages, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modGaragesac <- summary(modGarages_ac)
+  ModelsGarages <- rbind(ModelsGarages, 
+                      c(summary_modGaragesac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                      summary_modGaragesac$r.squared, 
+                      summary_modGaragesac$adj.r.squared)) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  
+    ## 3. Model for mail/package carriers:
+  # Calculate ac coefficients
+  ac_mail <- autocov_dist(dataset$DistToMail, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_mail)){ print("Error AC mail")}
+  dataset %<>% add_column(ac_mail = ac_mail)
+  # Run model
+  modMail_ac <- lm(log(DistToMail+1) ~ Category_rare + ac_mail, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modMailac <- summary(modMail_ac)
+  ModelsMail <- rbind(ModelsMail, 
+                     c(summary_modMailac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                       summary_modMailac$r.squared, 
+                       summary_modMailac$adj.r.squared))
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  ## 4. Model for natural products industry = wood related activities:
+  # Calculate ac coefficients
+  ac_wood <- autocov_dist(dataset$DistToWood, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_wood)){ print("Error AC wood")}
+  dataset %<>% add_column(ac_wood = ac_wood)
+  # Run model
+  modWood_ac <- lm(log(DistToWood+1) ~ Category_rare + ac_wood, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modWoodac <- summary(modWood_ac)
+  ModelsWood <- rbind(ModelsWood, 
+                     c(summary_modWoodac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                       summary_modWoodac$r.squared, 
+                       summary_modWoodac$adj.r.squared))
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  
+  ## 5. Model for wineries:
+  # Calculate ac coefficients
+  ac_wineries <- autocov_dist(dataset$DistToWineries, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_wineries)){ print("Error AC wineries")}
+  dataset %<>% add_column(ac_wineries = ac_wineries)
+  # Run model
+  modWineries_ac <- lm(log(DistToWineries+1) ~ Category_rare + ac_wineries, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modWineriesac <- summary(modWineries_ac)
+  ModelsWineries <- rbind(ModelsWineries, 
+                     c(summary_modWineriesac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                       summary_modWineriesac$r.squared, 
+                       summary_modWineriesac$adj.r.squared))
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  ## 6. Model for popular gathering sites = hobbies:
+  # Calculate ac coefficients
+  ac_hobbies <- autocov_dist(dataset$DistToHobbies, coords, nbs = 500, type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_hobbies)){ print("Error AC hobbies")}
+  dataset %<>% add_column(ac_hobbies = ac_hobbies)
+  # Run model
+  modHobbies_ac <- lm(log(DistToHobbies+1) ~ Category_rare + ac_hobbies, data = dataset)
+  # plotresid(modRail_ac)
+  summary_modHobbiesac <- summary(modHobbies_ac)
+  ModelsHobbies <- rbind(ModelsHobbies, 
+                     c(summary_modHobbiesac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
+                       summary_modHobbiesac$r.squared, 
+                       summary_modHobbiesac$adj.r.squared))
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  if (i %% 100 == 0){
+    print (i)
+  }
+}
+
+
+ModelsAirports <- data.frame(ModelsAirports)
+names(ModelsAirports) = c("Int_est", "DJ_est", "DN_est", 
+                      "AC_est",
+                      "Intp", "DJp", "DNp", 
+                      "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsAirports, file.path(here(), "tables", "ModelsAirports_rarefied.csv"), row.names = F)
+
+
+ModelsGarages <- data.frame(ModelsGarages)
+names(ModelsGarages) = c("Int_est", "DJ_est", "DN_est", 
+                      "AC_est",
+                      "Intp", "DJp", "DNp", 
+                      "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsGarages, file.path(here(), "tables", "ModelsGarages_rarefied.csv"), row.names = F)
+
+
+ModelsMail <- data.frame(ModelsMail)
+names(ModelsMail) = c("Int_est", "DJ_est", "DN_est", 
+                     "AC_est",
+                      "Intp", "DJp", "DNp", 
+                     "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsMail, file.path(here(), "tables", "ModelsMail_rarefied.csv"), row.names = F)
+
+
+ModelsWood <- data.frame(ModelsWood)
+names(ModelsWood) = c("Int_est", "DJ_est", "DN_est", 
+                     "AC_est",
+                      "Intp", "DJp", "DNp", 
+                     "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsWood, file.path(here(), "tables", "ModelsWood_rarefied.csv"), row.names = F)
+
+
+ModelsWineries<- data.frame(ModelsWineries)
+names(ModelsWineries) = c("Int_est", "DJ_est", "DN_est", 
+                     "AC_est",
+                      "Intp", "DJp", "DNp", 
+                     "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsWineries, file.path(here(), "tables", "ModelsWineries_rarefied.csv"), row.names = F)
+
+
+ModelsHobbies <- data.frame(ModelsHobbies)
+names(ModelsHobbies) = c("Int_est", "DJ_est", "DN_est", 
+                     "AC_est",
+                      "Intp", "DJp", "DNp", 
+                     "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsHobbies, file.path(here(), "tables", "ModelsHobbies_rarefied.csv"), row.names = F)
+
+```
+
+
+Visualize rarefied dataset
+```{r visualize full DistToRail data}
+ModelsAirports <- read.csv(file.path(here(), "tables",  "ModelsAirports_rarefied.csv"))
+
+ModelsAirports %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+#DJ: S = 306 --> no
+
+
+ModelsGarages <- read.csv(file.path(here(), "tables",  "ModelsGarages_rarefied.csv"))
+
+ModelsGarages %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+#DJ: S = 86 --> no
+
+
+ModelsMail <- read.csv(file.path(here(), "tables",  "ModelsMail_rarefied.csv"))
+
+ModelsMail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+#DJ: S = 17 --> no
+
+
+
+ModelsWood <- read.csv(file.path(here(), "tables",  "ModelsWood_rarefied.csv"))
+
+ModelsWood %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+#DJ: S = 151 --> no
+
+
+ModelsWineries <- read.csv(file.path(here(), "tables",  "ModelsWineries_rarefied.csv"))
+
+ModelsWineries %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+#DJ: S = 1144 --> no
+
+
+ModelsHobbies <- read.csv(file.path(here(), "tables",  "ModelsHobbies_rarefied.csv"))
+
+ModelsHobbies %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(DJsignif)
+#DJ: S = 183 --> no
+```
