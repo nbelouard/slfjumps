@@ -100,7 +100,8 @@ dim(slf_tiny) # 327347 rows
 table(slf_tiny$bio_year)
 #we only want 2014 to 2020
 slf_tiny %<>% filter(bio_year %in% c(2014:2020))
-dim(slf_tiny) #324091 rows  
+dim(slf_tiny) #324091 rows
+table(slf_tiny$bio_year)
 length(unique(slf_tiny$state))
 
 head(slf_tiny)
@@ -137,6 +138,8 @@ grid_data <- slf_tiny %>%
 
 knitr::kable(head(grid_data))
 dim(grid_data) #58331 rows
+
+table(grid_data$bio_year)
 ```
 
 
@@ -172,9 +175,9 @@ grid_data %>% filter(slf_established == T) %>%
 # The westernmost longitude with established populations is -80.6
 
 # We can eliminate points at longitudes west of -90 to eliminate some useless points
-grid_data %<>% filter(longitude_rounded > -90)
-dim(grid_data) #58144
-dim(grid_data %>% filter(slf_established == T))[1] #the number of positive points did not change (7044)
+# grid_data %<>% filter(longitude_rounded > -90)
+# dim(grid_data) #58144
+# dim(grid_data %>% filter(slf_established == T))[1] #the number of positive points did not change (7044)
 
 # Map it
 map <- ggplot(data = states) +
@@ -218,9 +221,12 @@ The table now has `r dim(grid_data)[1]` rows.
 ```{r calculate distances to the introduction point, echo = params$display, eval = params$run}
 
 #Coordinates of the introduction site, extracted from Barringer et al. 2015
-centroid <- data.frame(longitude_rounded = -75.675340, latitude_rounded = 40.415240)
+centroid2 <- data.frame(longitude_rounded = -75.675340, latitude_rounded = 40.415240)
+centroid <- c(grid_data %>% filter(slf_established == T) %>% summarise(mean(longitude_rounded)) %>% pull(),
+              grid_data %>% filter(slf_established == T) %>% summarise(mean(latitude_rounded)) %>% pull())
+
 # centroid <- data.frame(latitude_rounded = mean(grid_data$latitude_rounded),
-                       longitude_rounded = mean(grid_data$longitude_rounded)
+                       # longitude_rounded = mean(grid_data$longitude_rounded)
 
 #Compute distances to the introduction point, in km
 grid_data <- grid_data %>% 
@@ -250,9 +256,11 @@ grid_data <- grid_data %>%
 # Save the grid file = points with their distance to the introduction site
 write.csv(grid_data, file.path(here(), "exported-data", "grid_data.csv"), row.names = F)
 dim(grid_data)[1]
-# The number of rows must be 58,144 with 2014-2020 data
+# The number of rows must be 58,331 with 2014-2020 data
 
-
+table(grid_data$bio_year)
+pos <- grid_data %>% filter(slf_established == T)
+table(pos$bio_year)
 ```
 
 We first calculate the distance between each survey point and the introduction point (-75.675340, 40.415240, from Barringer et al., 2015). This distance will be the basis of all subsequent analyses. The summary of this distance is (in kilometers):  
@@ -262,7 +270,28 @@ We also create a variable summarizing the status of the survey for each point: S
 \newpage
 
 
+```{r figure sampling effort}
 
+surveys <- as.data.frame(table(slf_tiny$bio_year))
+points <- as.data.frame(table(grid_data$bio_year))
+positive <- as.data.frame(table(pos$bio_year))
+
+surveys %<>% add_column(Type = "Surveys")
+points %<>% add_column(Type = "Points")
+positive %<>% add_column(Type = "Positive points")
+
+effort <- rbind(surveys, points, positive)
+effort$Type <- factor(effort$Type, levels = c("Surveys", "Points", "Positive points"))
+
+effort_plot <- ggplot() +
+  geom_point(data = effort, aes(x = Var1, y = log(Freq), shape = Type), size = 3) +
+  theme_classic() +
+  xlab("Year") + ylab("log(count)")
+  
+
+ggsave(file.path(here(), "figures", "jump_list", "00. number of surveys.jpg"), effort_plot)
+
+```
 
 
 
@@ -281,6 +310,8 @@ We divide the invasion records into sectors to increase the accuracy of subseque
 ```{r load dataset}
 grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"), h=T)
 dim(grid_data)
+table(grid_data$bio_year)
+
 ```
 
 Now we need to figure out the best set of parameters to find the accurate number of jumps, i.e. the highest number of jumps detected by the algorithm. To do so, we run several analysis with extreme sets of parameters to get closer to a plateau in the number of jumps that are found, before a finer optimization is done.
@@ -330,6 +361,7 @@ rm(Results)
 ```
 
 The right number of sectors is close to 20-28.
+(28-36 without centroid)
 
 ```{r first approximation of the number of rotations}
 # Then, look at the number of rotations needed
@@ -363,14 +395,14 @@ while (dim(Results$Jump)[1] > Results_prev){
 print(paste0("The number of rotations is likely between ", k, " and ", r))
 ```
 
-The number of rotations is close to 2-7.
+The number of rotations is close to 2-7 (2-7 without centroid).
 Use these approximations to run the optimization program!
 
 ```{r run optimization}
 # Here we are going to run the number of sectors of every multiple of 4 between 20 and 32
 # and the number of rotations between 1 and 10
 
-sectors = c(20, 24, 28)
+sectors = c(20, 24, 28, 32, 36)
 rotations = c(1, 2, 3, 4, 5, 6, 7)
 centroid <- c(-75.675340, 40.415240)
   
@@ -408,17 +440,42 @@ for (s in sectors){
 
 # List of jumps
 head(optim_list)
-write.csv(optim_list, file.path(here(), "tables", "optim_list.csv"))
+write.csv(optim_list, file.path(here(), "tables", "optim_list_wo_centroid.csv"))
 
 # List of the number of jumps found per combination
 optim_sum <- optim_list %>% group_by(s, r) %>% summarise(jumps = n())
 head(optim_sum)
 max(optim_sum$jumps)
 
-write.csv(optim_sum, file.path(here(), "tables", "optim_jumps.csv"))
+write.csv(optim_sum, file.path(here(), "tables", "optim_jumps_wo_centroid.csv"))
 
 ```
 
+```{r compare with and without centroid}
+
+optim_list_good <- optim_list %>% filter(s == 24, r == 5) 
+dim(optim_list_good)
+
+optim_list_centroid <- read.csv(file.path(here(), "tables", "optim_list.csv"))
+optim_list_centroid_good <- optim_list_centroid %>% filter(s == 20, r == 3) 
+dim(optim_list_centroid_good)
+
+# All jumps one set
+ggplot(data = states) +
+  geom_point(data = optim_list_good,
+             aes(x = longitude_rounded, y = latitude_rounded), size = 4, shape = 19, col = "grey") +
+  geom_point(data = optim_list_centroid_good, 
+             aes(x = longitude_rounded, y = latitude_rounded),  size = 0.5, shape = 19, col = "black") +
+  # geom_point(data = centroid,
+             # aes(x = longitude_rounded, y = latitude_rounded), col = "blue", shape = 4, size = 5) +
+    # geom_point(data = centroid2,
+             # aes(x = longitude_rounded, y = latitude_rounded), col = "red", shape = 4, size = 5) +
+  geom_sf(data = states, alpha = 0) + 
+  coord_sf(xlim = c(-82, -72), ylim = c(38, 43), expand = FALSE) + 
+  theme(legend.position="top") +
+  guides(fill = guide_legend("Year"))
+
+```
 
 Plot the optimization
 
@@ -585,6 +642,7 @@ write.csv(Jumps_full_rarefied, file.path(here(), "exported-data", "jumps_full_ra
 Jumps <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
 Jumps %<>% mutate(Rarefied = ifelse(is.na(Rarefied), "Full", "Rarefied"))
 dim(Jumps)
+Jumps %>% filter(bio_year == 2020)
 Jumps$Rarefied <- factor(Jumps$Rarefied, levels = c( "Full", "Rarefied"))
 
 Thresholds <- read.csv(file.path(here(), "./exported-data/thresholds.csv"))
@@ -752,6 +810,28 @@ threshold_data %<>% group_by(bio_year, rotation1) %>%
   summarise(MaxDist = max(DistToIntro)) %>% 
   rename(sectors_nb = rotation1)
 
+test2 <- Thresholds %>%
+  mutate(bio_year = as.factor(bio_year),
+         sectors_nb = as.factor(sectors_nb)) %>% 
+  complete(bio_year, sectors_nb, fill=list(DistToIntro=0)) %>% 
+  group_by(sectors_nb) %>% 
+  nest() %>% 
+  mutate(data2 = purrr::map(
+    data, function(x){x %>% mutate(next_year = lag(DistToIntro),
+                                   next_year = replace_na(next_year, 0),
+                                   progress = DistToIntro - next_year)}
+  )
+  )
+
+test2 %<>% 
+  select(data2) %>% 
+  unnest(data2)
+
+sd(test2$progress, na.rm=T)
+
+test2 %>% 
+  ggplot(aes(x = bio_year, y = progress))+
+  geom_boxplot(aes(fill = bio_year))
 
 spread <- ggplot() +
     geom_bar(data = threshold_data, aes(x = bio_year, y = MaxDist), stat="identity", fill = "white", col = "black") +
