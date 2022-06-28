@@ -49,44 +49,57 @@ slf_uptodate_long$DistanceType <- factor(slf_uptodate_long$DistanceType, levels 
 
 slf_uptodate_long %>% group_by(Category_rare, DistanceType) %>% count()
 
+slf_uptodate_long %>% mutate(Category_full = recode(Category_full, "Jumpers" = "Jump points",
+                                                    "Diffusers" = "Diffusion points",
+                                                    "Negatives" = "Negative points"),
+                             Category_rare = recode(Category_rare, "Jumpers" = "Jump points",
+                                                    "Diffusers" = "Diffusion points",
+                                                    "Negatives" = "Negative points"))
 
 
 # Plot distances (full dataset)
-transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Category_full)) + 
+transport_bpfull <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Category_full)) + 
   geom_boxplot(aes(fill = Category_full), 
                show.legend = F,
                # outlier.shape = NA
                ) +
-  scale_fill_brewer(palette = "Dark2") +
+  scale_fill_manual(values = c("white", "lightgray", "grey30")) +
   facet_wrap(~DistanceType, scales = "free_y", ncol = 4, 
              labeller = labeller(DistanceType = 
     c("DistToRail" = "Railroad",
       "DistToRoad" = "Major road",
-      "DistIntRlRd" = "Both"))) +
+      "DistIntRlRd" = "Intersection of railroads and roads"))) +
   # coord_cartesian(ylim=c(0, 16)) +
-  xlab("Category") + ylab("Distance to the nearest... (km)") +
-  theme_classic()
+  xlab(NULL) + ylab("Distance to the nearest... (km)") +
+  theme_classic() +
+  ggtitle("(A) Full dataset") +
+  theme(axis.text.x=element_blank())
 
-transport_bp
+transport_bpfull
 
-ggsave(file.path(here(), "figures", "jump_transports", "1bis. boxplot transport_fulldata.jpg"), transport_bp, width = 7, height = 2.5)
+ggsave(file.path(here(), "figures", "jump_transports", "1bis. boxplot transport_fulldata_v2.jpg"), transport_bp, width = 7, height = 2.5)
 
 
 # Plot distances (rarefied dataset)
-transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Category_rare)) + 
-  geom_boxplot(aes(fill = Category_rare), alpha = 0.5, show.legend = F) +
-  scale_fill_brewer(palette = "Dark2") +
+transport_bprare <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Category_rare)) + 
+  geom_boxplot(aes(fill = Category_rare), show.legend = F) +
+  scale_fill_manual(values = c("white", "lightgray", "grey30")) +
   facet_wrap(~DistanceType, scales = "free_y", ncol = 4,
               labeller = labeller(DistanceType =
     c("DistToRail" = "Railroad",
       "DistToRoad" = "Major road",
-      "DistIntRlRd" = "Both"))) +
-  xlab("Category") + ylab("Distance to the nearest... (km)") +
-  theme_classic()
+      "DistIntRlRd" = "Intersection of railroads and roads"))) +
+  xlab(NULL) + ylab("Distance to the nearest... (km)") +
+  theme_classic() +
+  ggtitle("(B) Rarefied dataset")
 
 transport_bp
 
-ggsave(file.path(here(), "figures", "jump_transports", "2bis. boxplot transport_rarefieddata.jpg"), transport_bp, width = 7, height = 2.5)
+ggsave(file.path(here(), "figures", "jump_transports", "2bis. boxplot transport_rarefieddata_v2.jpg"), transport_bp, width = 7, height = 2.5)
+
+library(gridExtra)
+figure <- grid.arrange(transport_bpfull, transport_bprare)
+ggsave(file.path(here(), "figures", "jump_transports", "3. boxplot transport.jpg"), figure, width = 7, height = 5)
 
 ```
 
