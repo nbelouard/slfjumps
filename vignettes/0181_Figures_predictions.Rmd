@@ -37,10 +37,9 @@ sf::sf_use_s2(FALSE)
 
 # obtaining simple feature objects for states and finding centroids for label positioning
 states <- sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
-states <- st_transform(states, crs = "ESRI:102010")
+# states <- st_transform(states, crs = "ESRI:102010")
 # sf::st_as_sf(maps::map("county", plot = TRUE, fill = FALSE))
 states <- cbind(states, st_coordinates(st_centroid(states)))
-
 
 # making table key for state 2-letter abbreviations
 # the vectors state.abb and state.name contains strings of all
@@ -56,6 +55,11 @@ states$code <- state_abbr$state.abb
 ggplot() +
     geom_sf(data = states, alpha = 0) +
   geom_text(data = states, aes(X, Y, label = code), size = 2) 
+
+
+US <- st_read(file.path(here(), "figures", "GIS", "gadm36_Cont_USA_county.shp"), crs = "EPSG:4326", quiet = T)
+st_crs(US)
+US <- st_transform(US, crs = "ESRI:102010")
 
 ```
 
@@ -107,6 +111,7 @@ dim(Rarefied)
 max(Rarefied$DistToThreshold) # 307.8 km
 mean(Rarefied$DistToThreshold) # 87.56 km
 quantile(Rarefied$DistToThreshold, 0.95) # 262.55 km
+quantile(Full$DistToThreshold, 0.95) #222.5 km
 
 # Rarefied dataset, up to 2019
 Full <- DistToThreshold %>% filter(Rarefied == "Full", bio_year %in% c(2014:2019))
@@ -115,10 +120,12 @@ dim(Rarefied)
 max(Rarefied$DistToThreshold) # 307.84
 mean(Rarefied$DistToThreshold) # 87.78 km
 quantile(Rarefied$DistToThreshold, 0.95) # 285.43 km
+quantile(Full$DistToThreshold, 0.95) # 222.90 km
 ```
 
-The maximal distance between the invasion front and a jump recorded is 309 km, the distance of 95% of the jumps is 263 km (rarefied dataset), and the average distance is 88 km (rarefied dataset). 
-So we will use a buffer of 263 km.
+The distance of 95% of the jumps is 263 km (rarefied dataset), and the average distance is 88 km (rarefied dataset). 
+So we will use a buffer of 263 km for predictions up to 2020.
+For predictions up to 2019, the 95th percentile is 285.43 km
 
 ```{r buffer around invasion front 2020}
 # We first need to create a polyon that represents the invasion front. It's not a minimum convex hull!
@@ -321,7 +328,7 @@ ggplot(data = states) +
 
 ```
 
-For 2019
+For 2019 (might need to rerun the ones that are not in the manuscript, there was a mishap with atrisk_zone and atrisk_zone2019)
 ```{r intersect with at risk zone 2019}
 
 # At risk zone
@@ -427,7 +434,7 @@ slfPA_uptodate <- read.csv(file.path(here(), "exported-data", "slfPA_uptodate.cs
 
 # At risk zone
 atrisk_zone <- st_read(file.path(here(), "figures", "GIS", "atrisk_zone2019.shp"), quiet = T)
-
+st_area(atrisk_zone)
 
 mail_zone <- st_read(file.path(here(), "figures", "GIS", "landscape_zoneatrisk", "mail_zone2019.shp"), quiet = T)
 
@@ -477,41 +484,40 @@ past_jumps %<>% filter(bio_year < 2020)
 # jumps <- merge(jumps, jumpsPA, all = T)
 # write.csv(jumps, file.path(here(), "..", "slfjump_app", "data", "jumps.csv"))
 
-dist <- past_jumps[which(names(past_jumps) == 'DistIntRlRd')]
-risk = 0.95
-threshold <- quantile(dist[1], probs = risk, na.rm = T)
+dist <- past_jumps[which(names(past_jumps) == 'DistToRoad')] #choose layer
+risk = 0.95 #choose risk level
+threshold <- quantile(dist[1], probs = risk, na.rm = T) #calculate distance
 
-buffer <- st_buffer(roadrail_intersect_zone, dist = threshold)
+buffer <- st_buffer(road_zone, dist = threshold) #choose layer and make buffer
 st_area(buffer)/sum(st_area(US))
-175196000000/sum(st_area(US))
-202499000000/sum(st_area(US))
 
 
-#for 2021
-dist <- jumps_dist[which(names(jumps_dist) == 'DistToRoad')]
-risk = 0.95
-threshold <- quantile(dist[1], probs = risk, na.rm = T)
+# #for 2021
+# dist <- jumps_dist[which(names(jumps_dist) == 'DistToRoad')]
+# risk = 0.95
+# threshold <- quantile(dist[1], probs = risk, na.rm = T)
+# 
+# buffer <- st_buffer(road_zone, dist = threshold)
+# st_area(buffer)/1e6
+# /sum(st_area(US))
+# 185024000000/sum(st_area(US)) #rail
+# 202499000000/sum(st_area(US)) #road
+# 128462000000/sum(st_area(US)) #intersect
+# 
+# st_area(atrisk_zone)/sum(st_area(US))
 
-buffer <- st_buffer(road_zone, dist = threshold)
-st_area(buffer)/1e6
-/sum(st_area(US))
-185024000000/sum(st_area(US)) #rail
-202499000000/sum(st_area(US)) #road
-128462000000/sum(st_area(US)) #intersect
+atrisk_zone <- atrisk_zone %>% st_transform(crs = "+proj=longlat +datum=WGS84") 
+buffer <- buffer %>% st_transform(crs = "+proj=longlat +datum=WGS84") 
+
 ```
 
 Map it! With leaflet: requires to transform layers to WGS84
 ```{r jumps map}
 
-st_area(atrisk_zone)/sum(st_area(US))
-
-atrisk_zone <- atrisk_zone %>% st_transform(crs = "+proj=longlat +datum=WGS84") 
-buffer <- buffer %>% st_transform(crs = "+proj=longlat +datum=WGS84") 
-
 leaflet(data = buffer) %>% 
   addTiles() %>% 
   addPolygons() %>% 
-  addPolygons(data = rail_zone, col = "black") %>%
+  # addPolygons(data = rail_zone, col = "black") %>%
   addPolygons(data = atrisk_zone, fillColor = "red", weight = 0.1)
 
 ```
@@ -522,14 +528,138 @@ Now add jumps realized in 2020 and see if they are in the predicted high risk zo
 jumps2020 <- jumps %>% filter(bio_year == 2020)
 jumps2020 <- st_as_sf(x = jumps2020, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F) %>% 
   st_transform(crs = "+proj=longlat +datum=WGS84") 
+print(jumps2020)
 
+buffer %<>% 
+  st_transform(crs = "+proj=longlat +datum=WGS84")
 
 leaflet(data = buffer) %>% 
   addTiles() %>% 
   addPolygons() %>%
-  addCircles(data = jumps2020, ~longitude_rounded, ~latitude_rounded, 
-             color = "red", fillColor = "red", fillOpacity = 0.7
+  addCircleMarkers(data = jumps2020, ~longitude_rounded, ~latitude_rounded, 
+             color = "red", fillColor = "red", fillOpacity = 0.7, radius = 7
              ) #%>%
   addPolygons(data = atrisk_zone, fillColor = "red", weight = 0.1)
 
+```
+
+
+With ggplot2 (for manuscript)
+```{r map predictions for 2020}
+
+jumps2020 <- jumps %>% filter(bio_year == 2020)
+jumps2020 <- st_as_sf(x = jumps2020, coords = c("longitude_rounded", "latitude_rounded"), crs = "EPSG:4269", remove = F)
+#%>%
+ # st_transform(crs = "+proj=longlat +datum=WGS84")
+
+# Roads
+dist <- past_jumps[which(names(past_jumps) == 'DistToRoad')] #choose layer
+risk = 0.95 #choose risk level
+threshold <- quantile(dist[1], probs = risk, na.rm = T) #calculate distance
+
+buffer <- st_buffer(road_zone, dist = threshold) #choose layer and make buffer
+st_area(buffer) #202,500
+st_area(buffer)/sum(st_area(US)) #0.0270
+
+
+map_predictionsroad <- ggplot() +
+  geom_sf(data = states, fill = "white") +
+  geom_sf(data = atrisk_zone, fill = "yellow", col = "yellow", alpha = 0.3,) +
+  geom_sf(data = buffer, fill = "red", col = "red", alpha = 0.3) +
+  geom_sf(data = jumps2020, size = 3) +
+    geom_sf(data = states, alpha = 0) +
+  coord_sf(xlim = c(-83, -70), ylim = c(36, 45)) +
+  
+  labs(x = "Longitude", y = "Latitude") +
+  ggtitle("(A) Major roads")
+
+map_predictionsroad
+ggsave(file.path(here(), "figures", "manuscript figures", "S4.buffer roads.jpg"), map_predictionsroad, height = 8, width = 8)
+
+
+# Railroads
+dist <- past_jumps[which(names(past_jumps) == 'DistToRail')] #choose layer
+risk = 0.95 #choose risk level
+threshold <- quantile(dist[1], probs = risk, na.rm = T) #calculate distance
+
+buffer <- st_buffer(rail_zone, dist = threshold) #choose layer and make buffer
+st_area(buffer) #174,34
+st_area(buffer)/sum(st_area(US))
+
+map_predictionsrail <- ggplot() +
+  geom_sf(data = states, fill = "white") +
+  geom_sf(data = atrisk_zone, fill = "yellow", col = "yellow", alpha = 0.3,) +
+  geom_sf(data = buffer, fill = "red", col = "red", alpha = 0.3) +
+  geom_sf(data = jumps2020, size = 3) +
+    geom_sf(data = states, alpha = 0) +
+  coord_sf(xlim = c(-83, -70), ylim = c(36, 45)) +
+  
+  labs(x = "Longitude", y = "Latitude") +
+  ggtitle("(B) Railroads")
+
+map_predictionsrail
+ggsave(file.path(here(), "figures", "manuscript figures", "S4.buffer rail.jpg"), map_predictionsrail, height = 8, width = 8)
+
+
+# Intersection rail/road
+dist <- past_jumps[which(names(past_jumps) == 'DistIntRlRd')] #choose layer
+risk = 0.95 #choose risk level
+threshold <- quantile(dist[1], probs = risk, na.rm = T) #calculate distance
+
+buffer <- st_buffer(roadrail_intersect_zone, dist = threshold) #choose layer and make buffer
+st_area(buffer) # 121,116 km2
+st_area(buffer)/sum(st_area(US)) #1.6%
+
+map_predictionsint <- ggplot() +
+  geom_sf(data = states, fill = "white") +
+  geom_sf(data = atrisk_zone, fill = "yellow", col = "yellow", alpha = 0.3,) +
+  geom_sf(data = buffer, fill = "red", col = "red", alpha = 0.3) +
+  geom_sf(data = jumps2020, size = 3) +
+    geom_sf(data = states, alpha = 0) +
+  coord_sf(xlim = c(-83, -70), ylim = c(36, 45)) +
+  
+  labs(x = "Longitude", y = "Latitude") +
+  ggtitle("(C) Intersection of roads and railroads")
+
+map_predictionsint
+ggsave(file.path(here(), "figures", "manuscript figures", "S4.buffer intersect.jpg"), map_predictionsint, height = 8, width = 8)
+
+
+
+# Package carriers
+dist <- past_jumps[which(names(past_jumps) == 'DistToMail')] #choose layer
+risk = 0.95 #choose risk level
+threshold <- quantile(dist[1], probs = risk, na.rm = T) #calculate distance
+
+buffer <- st_buffer(mail_zone, dist = threshold) #choose layer and make buffer
+st_area(buffer) # 52,729 km2
+st_area(buffer)/sum(st_area(Pennsylvania)) #0.7%
+
+Pennsylvania <- US %>% filter(NAME_1 == "Pennsylvania") %>% st_union()
+atrisk_PA <- st_intersection(atrisk_zone, Pennsylvania)
+buffer_PA <- st_intersection(buffer, Pennsylvania)
+jumps2020 %<>% st_transform(crs = st_crs(Pennsylvania))
+jumps_PA <- st_intersection(jumps2020, Pennsylvania)
+
+
+map_predictionsmail <- ggplot() +
+  geom_sf(data = states, fill = "white") +
+  geom_sf(data = atrisk_PA, fill = "yellow", col = "yellow", alpha = 0.3,) +
+  geom_sf(data = buffer_PA, fill = "red", col = "red", alpha = 0.3) +
+  geom_sf(data = jumps_PA, size = 3) +
+    geom_sf(data = states, alpha = 0) +
+  coord_sf(xlim = c(-83, -70), ylim = c(36, 45)) +
+  
+  labs(x = "Longitude", y = "Latitude") +
+  ggtitle("(D) Package carriers in Pennsylvania")
+
+map_predictionsmail
+ggsave(file.path(here(), "figures", "manuscript figures", "S4.buffer mail.jpg"), map_predictionsmail, height = 8, width = 8)
+
+
+figure4 <- grid.arrange(map_predictionsroad,
+                        map_predictionsrail,
+             map_predictionsint,
+             map_predictionsmail)
+ggsave(file.path(here(), "figures", "manuscript figures", "S4.buffer figure.jpg"), figure4, height = 8, width = 8)
 ```
