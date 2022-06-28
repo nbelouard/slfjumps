@@ -308,12 +308,12 @@ map_rarified <- ggplot(data = grid_data) +
   coord_sf(xlim = c(-81, -73), ylim = c(38, 43)) +
   geom_point(data = Jumps_fig1,
              aes(x = longitude_rounded, y = latitude_rounded, 
-                 col = as.factor(bio_year), group = Rarefied, stroke = Rarefied, shape = Rarefied), size = 3) +
+                 col = as.factor(bio_year), group = Rarefied, shape = Rarefied), stroke = 2, size = 3) +
   scale_discrete_manual(aesthetics = "stroke", values = c('Isolated' = 1, 'Clustered' = 1)) +
   scale_discrete_manual(aesthetics = "shape", values = c('Isolated' = 21, 'Clustered' = 19)) +
-  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  scale_alpha_manual(values = c(0.5, 1)) +
+  scale_color_manual(values = c("#F0E442", "#D55E00", "#0072B2", "black")) +
+  scale_fill_manual(values = c("#F0E442", "#D55E00", "#0072B2", "black")) +
+  # scale_stroke_manual(values = c(1, 2)) +
   labs(x = "Longitude", y = "Latitude") +
   theme(legend.position="right", text = element_text(size = 10),
         panel.background = element_rect(fill = "white"),
@@ -322,7 +322,7 @@ map_rarified <- ggplot(data = grid_data) +
 
 map_rarified
 
-ggsave(file.path(here(), "figures", "manuscript figures", "3. jumps_map_v2.jpg"), map_rarified, height = 8, width = 8)
+ggsave(file.path(here(), "figures", "manuscript figures", "3. jumps_map_v3.jpg"), map_rarified, height = 8, width = 8)
 ```
 
 Facet 2: number of jumps per year
@@ -336,10 +336,10 @@ Jumps_year <- Jumps_fig1 %>% group_by(bio_year, Rarefied) %>% summarise(n = n())
 Jumps_fig1$Rarefied <- factor(Jumps_fig1$Rarefied, levels = c( "Clustered", "Isolated"))
  
 jumps_plot <- ggplot() +
-  geom_bar(data = Jumps_year, aes(x = bio_year, y = n, fill = as.factor(bio_year), group = Rarefied, col = as.factor(bio_year), alpha = Rarefied), stat = "identity", lwd = .25) +
-  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  scale_alpha_manual(values = c(0, 1)) +
-  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+  geom_bar(data = Jumps_year, aes(x = bio_year, y = n, fill = as.factor(bio_year), group = Rarefied, col = as.factor(bio_year), alpha = Rarefied), stat = "identity", lwd = .25, show.legend = F) +
+  scale_fill_manual(values = c("#F0E442", "#D55E00", "#0072B2", "black")) +
+  scale_alpha_manual(values = c(1, 0)) +
+  scale_color_manual(values = c("#F0E442", "#D55E00", "#0072B2", "black")) +
   xlab("Year") +
   ylab("Number of jumps") +
   theme_classic() +
@@ -348,7 +348,7 @@ jumps_plot <- ggplot() +
 
 jumps_plot
 
-ggsave(file.path(here(), "figures", "manuscript figures", "3. number of jumps_v2.jpg"), jumps_plot, height = 2.5, width = 4)
+ggsave(file.path(here(), "figures", "manuscript figures", "3. number of jumps_v3.jpg"), jumps_plot, height = 2.5, width = 4)
 ```
 
 
@@ -407,11 +407,11 @@ MeanDist_jump <- ggplot() +
   geom_boxplot(data = JumpLength,
              aes(x = Rarefied, y = DistToThreshold, 
                  col = as.factor(bio_year),
-                 fill = as.factor(bio_year),
-                 alpha = Rarefied)) +
-  scale_alpha_manual(values = c(0.7,0)) +
-  scale_color_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
-  scale_fill_manual(values = c("gold2", "firebrick3", "#0072B2", "#009E73")) +
+                 fill = as.factor(bio_year)),
+                 alpha = 0.7) +
+  # scale_alpha_manual(values = c(0.7,0)) +
+  scale_color_manual(values = c("#F0E442", "#D55E00", "#0072B2", "black")) +
+  scale_fill_manual(values = c("#F0E442", "#D55E00", "#0072B2", "black")) +
   labs(x = "Dataset", y = "Distance from the invasion front (km)") +
   theme_classic() +
   theme(legend.position="top", text = element_text(size = 10), plot.tag.position = c(0.01, 1)) +
@@ -419,7 +419,7 @@ MeanDist_jump <- ggplot() +
 
 MeanDist_jump
 
-ggsave(file.path(here(), "figures", "manuscript figures", "3. jump distances.jpg"), MeanDist_jump, height = 2.5, width = 4)
+ggsave(file.path(here(), "figures", "manuscript figures", "3. jump distances_v2.jpg"), MeanDist_jump, height = 2.5, width = 4)
 ```
 
 Stats
@@ -448,7 +448,7 @@ fig2 <- ggdraw() +
 
 fig2
 
-ggsave(file.path(here(), "figures", "manuscript figures", "3. jump description_v2.jpg"), fig2, height = 10, width = 10)
+ggsave(file.path(here(), "figures", "manuscript figures", "3. jump description_v3.jpg"), fig2, height = 10, width = 10)
 
 ```
 
