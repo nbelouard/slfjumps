@@ -675,7 +675,7 @@ transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Catego
              labeller = labeller(DistanceType = 
     c("DistToRail" = "Railroad",
       "DistToRoad" = "Major road",
-      "DistIntRlRd" = "Both"))) +
+      "DistIntRlRd" = "Intersection of railroads and roads"))) +
   # coord_cartesian(ylim=c(0, 16)) +
   xlab("Category") + ylab("Distance to the nearest... (km)") +
   theme_classic()
@@ -693,7 +693,7 @@ transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, x = Catego
               labeller = labeller(DistanceType =
     c("DistToRail" = "Railroad",
       "DistToRoad" = "Major road",
-      "DistIntRlRd" = "Both"))) +
+      "DistIntRlRd" = "Intersection of railroads and roads"))) +
   xlab("Category") + ylab("Distance to the nearest... (km)") +
   theme_classic()
 
@@ -755,6 +755,23 @@ pwr.f2.test(u = 3,
             sig.level = 0.05, #significance level
             power = NULL)
 # power = 0.47
+
+
+#And now for PA only:
+# Imagining a model with a small (0.05) to moderate (0.1) effect size
+pwr.f2.test(u = 3, 
+            v = 243, 
+            f2 = 0.1, #effect size
+            sig.level = 0.05, #significance level
+            power = NULL)
+# power > 0.99
+
+pwr.f2.test(u = 3, 
+            v = 243, 
+            f2 = 0.05, #effect size
+            sig.level = 0.05, #significance level
+            power = NULL)
+# power = 0.85
 
 ```
 
