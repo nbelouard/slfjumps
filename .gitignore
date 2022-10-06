@@ -2,6 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
-figures
-tables
-exported-data
+figures/
+tables/
+exported-data/
+data/*
