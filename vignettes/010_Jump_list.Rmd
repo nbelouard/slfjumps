@@ -1,5 +1,5 @@
 ---
-title: "#1: Isolating jump dispersal and diffusive spread"
+title: "#1: Isolating dispersal jumps and diffusive spread"
 author: 
 - Nadege Belouard^[Temple University, nadege.belouard@gmail.com]
 - Sebastiona De Bona^[Temple University, sebastiano.debona@temple.edu]
