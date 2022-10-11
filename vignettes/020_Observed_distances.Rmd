@@ -1,0 +1,1208 @@
+---
+title: "#2: Calculating distances between points and infrastructures"
+author: 
+- Nadege Belouard^[Temple University, nadege.belouard@temple.edu]
+date: "5/1/2021"
+output:
+  pdf_document:
+    toc: TRUE
+    toc_depth: 2
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+params:
+  show_code: FALSE
+  export_figures: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup for rendering, include = F}
+# here we set the images to png, to reduce the size of the output
+# we set some global paramters in the yaml to allow us to switch the chunks
+# of code on and off when displaying
+knitr::opts_chunk$set(dpi = 300, echo = params$show_code)
+```
+
+# 1. Aim and setup
+ 
+For this second vignette, we want to prepare all the spatial layers as well as the SLF dataset, and calculate, for each point, the distance to the closest infrastructure of each type.
+
+## Load packages
+```{r states names and centroid for global map, message = FALSE, warning = FALSE, echo = params$display}
+
+library(tidyverse)
+library(sf)
+library(spData)
+# library(RVAideMemoire)
+library(dplyr)
+library(gridExtra)
+library(magrittr)
+# library(purrr)
+library(here)
+# library(FSA)
+library(ape)
+library(spdep)
+library(leaflet)
+
+sf::sf_use_s2(FALSE)
+```
+
+## States map
+```{r states names and centroid for global map, message = FALSE, warning = FALSE, echo = params$display}
+# extracts a map of the States and recodes state labels to show the two-letter code rather than the full state name.
+
+# obtaining simple feature objects for states and finding centroids for label positioning
+states <- sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
+# sf::st_as_sf(maps::map("county", plot = TRUE, fill = FALSE))
+states <- cbind(states, st_coordinates(st_centroid(states)))
+
+# making table key for state 2-letter abbreviations
+# the vectors state.abb and state.name contains strings of all
+# US states and abbreviations
+state_abbr <- tibble(state.name = str_to_lower(state.name), state.abb) %>%
+  left_join(tibble(ID = states$ID), ., by = c(ID = "state.name")) %>%
+  mutate(state.abb = replace_na(state.abb, ""))
+
+# adding 2-letter codes to sf
+states$code <- state_abbr$state.abb
+
+
+# More precise map
+US <- st_read(file.path(here(), "data", "USmap", "gadm36_Cont_USA_county.shp"), 
+              crs = "EPSG:4326", quiet = T)
+st_crs(US)
+US <- st_transform(US, crs = "ESRI:102010")
+
+```
+
+
+
+# 2. Prepare the SLF dataset
+
+## a. Full invasion range 
+
+We want to select points that are in the convex hull of positive points to avoid biasing analyses with negative points in uninvaded regions.
+
+Load the dataset
+```{r load datasets, message = FALSE, warning = FALSE}
+
+# SLF data (in the folder SLF_datascience)
+# First, load the dataset that contains the location of each survey
+grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"))
+head(grid_data)
+dim(grid_data) #58331
+unique(grid_data$bio_year)
+dim(grid_data %>% filter(slf_established == T))
+
+```
+
+
+Select only points in the convex hull of positive points
+
+To avoid biasing the landscape analysis towards significance by using negative points over areas that SLF have not reached so far, we subset the dataset to keep only surveys within the convex hull of all positive points (Figure S1). 
+
+1. Create the minimum convex polygon of the SLF data
+```{r create chull}
+
+grid_data <- st_as_sf(x = grid_data, 
+                      coords = c("longitude_rounded", "latitude_rounded"), 
+                      crs = "EPSG:4269", remove = F)
+grid_data_positive <- grid_data %>% filter(slf_established == TRUE)
+dim(grid_data_positive) #7044
+hull <- st_convex_hull(st_union(grid_data_positive))
+#st_area(hull)
+
+# early_surveys <- grid_data_positive %>% filter(bio_year %in% c(2014:2017))
+# early_hull <- st_convex_hull(st_union(early_surveys))
+# st_area(early_hull)
+
+#Verify that no positive point is left in grid_data
+setdiff(grid_data, grid_data_positive) %>% filter(slf_established) #0
+
+# Visualize points and chull
+chull <- ggplot(data = states, fill = "white") +
+  geom_sf() +
+  geom_sf(data = grid_data, aes(col = slf_established)) +
+  geom_sf(data = hull, alpha = 0.5, fill = "white") + 
+  labs(x = "Longitude", y = "Latitude") +
+  # coord_sf(xlim = c(-88, -68), ylim = c(33, 46), expand = FALSE)
+  coord_sf(xlim = c(-83, -72), ylim = c(37, 44), expand = FALSE)
+
+chull
+
+# save the polygon
+testNmkdir("figures/GIS")
+st_write(hull, file.path(here(), "figures", "GIS", "chull.shp"), 
+         driver = "ESRI Shapefile", append = F)
+```
+
+
+2. Keep only the points that are in the chull
+```{r subset grid data}
+dim(grid_data) #58144
+dim(grid_data %>% filter(slf_established)) #7044
+st_crs(grid_data)
+grid_data <- st_transform(grid_data, crs = "ESRI:102010")
+st_crs(grid_data)$units
+
+hull <- st_read(file.path(here(), "figures", "GIS", "chull.shp"), quiet = T) 
+st_crs(hull)
+hull <- st_transform(hull, crs = "ESRI:102010")
+st_crs(hull)$units
+
+# We need to make a small buffer around the chull so that points that make the bounding box are included in it!
+chull <- st_buffer(hull, dist = 100)
+
+grid_data_chull <- st_intersection(grid_data, chull)
+dim(grid_data_chull) #45798, lower than grid_data
+dim(grid_data_chull %>% filter(slf_established)) #7044, same as grid_data
+head(grid_data_chull)
+
+ggplot(data = states, fill = "white") +
+  geom_sf() +
+  # geom_sf(data = grid_data, col = "black") +
+  geom_sf(data = grid_data_chull, col = "blue") +
+  geom_sf(data = chull, alpha = 0, col = "black") +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-81, -73), ylim = c(38, 43))
+
+
+# save the dataset
+st_geometry(grid_data_chull) <- NULL
+write.csv(grid_data_chull, 
+          file.path(here(), "exported-data", "grid_data_chull.csv"), 
+          row.names = F)
+
+```
+
+
+3. Summarise it so that we calculate the distances for each point only once
+```{r summarize grid dataset}
+# Extract each point independently of the year it was sampled (for distance calculations)
+grid_data_chull <- read.csv(file.path(here(),  "exported-data", 
+                                      "grid_data_chull.csv"), h=T)
+dim(grid_data_chull) #45798
+head(grid_data_chull)
+
+# are there still duplicated rows?
+base::anyDuplicated(grid_data_chull %>% 
+                select(longitude_rounded, latitude_rounded))
+# yes
+
+grid_chull_unique <- grid_data_chull %>%
+  select(latitude_rounded, longitude_rounded) %>% 
+  distinct(latitude_rounded, longitude_rounded)
+dim(grid_chull_unique) #32756
+head(grid_chull_unique)
+
+# are there still duplicated rows?
+anyDuplicated(grid_chull_unique %>% 
+                select(longitude_rounded, latitude_rounded))
+# no
+
+# Visualize the data
+grid_unique_layer <- st_as_sf(x = grid_chull_unique, 
+                              coords = c("longitude_rounded", "latitude_rounded"), 
+                              crs = "EPSG:4269", remove = F)
+
+grid_data_chull <- st_as_sf(x = grid_data_chull, 
+                              coords = c("longitude_rounded", "latitude_rounded"), 
+                              crs = "EPSG:4269", remove = F)
+
+# Visualize the data
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = grid_data_chull, col = "red") +
+  geom_sf(data = grid_unique_layer, col = "blue") +
+    labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-88, -68), ylim = c(33, 46), expand = FALSE)
+
+# save the dataset
+write.csv(grid_chull_unique, file.path(here(), "exported-data", 
+                                       "grid_chull_unique.csv"), row.names = F)
+
+```
+
+
+
+## b. Pennsylvania
+
+Load the SLF dataset and clip the form of PA
+```{r load datasets, message = FALSE, warning = FALSE}
+
+grid_data_chull <- read.csv(file.path(here(), "exported-data", 
+                                        "grid_data_chull.csv"))
+dim(grid_data_chull) 
+head(grid_data_chull)
+
+# Make it a shapefile to visualize the data
+grid_chull_layer <- st_as_sf(x = grid_data_chull, 
+                             coords = c("longitude_rounded", "latitude_rounded"), 
+                             crs = "EPSG:4269", remove = F) %>% 
+  st_transform(crs = "ESRI:102010")
+
+# Visualize the data
+ggplot(data = states) +
+  geom_sf(data = states, fill = "white") +
+  geom_sf(data = grid_chull_layer, col = "red") +
+  # coord_sf(xlim = c(1000000, 2000000), 
+           # ylim = c(-200000, 600000), expand = FALSE) +
+  labs(x = "Longitude", y = "Latitude")
+
+
+# Next load the dataset that contains all jumpers identified by sets of parameters
+jumpers <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
+jumpers %<>% add_column(Category = "Jumpers") 
+jumpers_layer <- st_as_sf(x = jumpers, 
+           coords = c("longitude_rounded", "latitude_rounded"), 
+           crs = "EPSG:4269", remove = F) %>% 
+  st_transform(crs = "ESRI:102010")
+
+
+
+```
+
+Form of PA
+```{r PA form}
+US <- st_read(file.path(here(), "data", "USmap", "gadm36_Cont_USA_county.shp"), 
+              crs = "EPSG:4326", quiet = T) %>% 
+  st_transform(US, crs = "ESRI:102010")
+Pennsylvania <- US %>% filter(NAME_1 == "Pennsylvania")
+
+# Visualize Pennsylvania
+ggplot(data = US, fill = "white") +
+  geom_sf() +
+  geom_sf(data = Pennsylvania, col = "blue") +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+```
+
+In grid data
+```{r clip grid data in PA}
+
+slfPA <- st_intersection(grid_chull_layer, Pennsylvania) 
+dim(slfPA) 
+
+# Visualize shapefiles
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = grid_chull_layer, col = "red") +
+  geom_sf(data = slfPA, col = "blue") +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") #+
+  # coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000))
+  
+# This is PA clipped from the chull
+st_geometry(slfPA) <- NULL
+write.csv(slfPA, file.path(here(), "exported-data", "slfPA.csv"), row.names=F)
+
+# Same for jumps
+jumpsPA <- st_intersection(jumpers_layer, Pennsylvania) 
+dim(jumpsPA) 
+st_geometry(jumpsPA) <- NULL
+write.csv(jumpsPA, file.path(here(), "exported-data", "jumpsPA.csv"), row.names=F)
+```
+
+Summarise it so that we calculate the distances for each point only once
+```{r summarize grid dataset}
+# Extract each point independently of the year it was sampled (for distance calculations)
+slfPA <- read.csv(file.path(here(), "exported-data", 
+                                      "slfPA.csv"), h=T)
+dim(slfPA) 
+head(slfPA)
+
+# are there still duplicated rows?
+base::anyDuplicated(slfPA %>% 
+                select(longitude_rounded, latitude_rounded))
+# yes
+
+slfPA_unique <- slfPA %>%
+  select(latitude_rounded, longitude_rounded) %>% 
+  distinct(latitude_rounded, longitude_rounded)
+dim(slfPA_unique) 
+head(slfPA_unique)
+
+# are there still duplicated rows?
+anyDuplicated(slfPA_unique %>% 
+                select(longitude_rounded, latitude_rounded))
+# no
+
+# Visualize the data
+slfPA_unique_layer <- st_as_sf(x = slfPA_unique, 
+                              coords = c("longitude_rounded", "latitude_rounded"), 
+                              crs = "EPSG:4269", remove = F)
+
+# Visualize the data
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  # geom_sf(data = grid_data_chull, col = "red") +
+  geom_sf(data = slfPA_unique_layer, col = "blue") +
+    labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-88, -68), ylim = c(33, 46), expand = FALSE)
+
+# save the dataset
+write.csv(slfPA_unique, file.path(here(), "exported-data", 
+                                       "slfPA_unique.csv"), row.names = F)
+
+```
+
+
+
+#3. Prepare the landscape layers
+
+## a. Full invasion range: railroads and roads
+
+1. Load the GIS shapefiles
+
+```{r load landscape features, message = FALSE, warning = FALSE}
+
+#Shapefiles for:
+
+## SLF dropped along the way:
+# Railroads (lines, buffer radius = 5 m)
+# These are railroads as defined by the USGS National Transportation Dataset. All lines have been merged and projected before buffer construction.
+rail <- st_read(file.path(here(), "data", "Transports", "Railways_full_buffer5m.shp"), 
+                quiet = T)
+st_crs(rail)
+
+# Roads (lines, buffer radius = 15 m)
+# This shapefile contains primary and secondary roads as defined by the US Census bureau. There is no information on traffic volume (AADT). All lines have been merged and projected before buffer construction.
+road <- st_read(file.path(here(), "data", "Transports", "road_buffer15m.shp"), 
+                quiet = T)
+st_crs(road)
+
+```
+
+
+2. Make a buffer around the chull to subset the lansdscape features
+We use a buffer because for points close to the border of the chull, the closest rail or road might be outside of the chull
+```{r buffer around chull, message = FALSE, warning = FALSE}
+
+hull <- st_read(file.path(here(), "figures", "GIS", "chull.shp"), quiet = T)
+# We need to project the hull for homogeneity with road and rails
+st_crs(hull)
+chull <- st_transform(hull, crs = "ESRI:102010")
+chull_buffer <- st_buffer(chull, dist = 100000) #100 km to be sure
+
+# Visualize points and chull
+ggplot(data = states, fill = "white") +
+  geom_sf() +
+  geom_sf(data = chull_buffer, alpha = 0.5, fill = "white") +
+  geom_sf(data = chull, alpha = 0.5, fill = "yellow") + 
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-88, -68), ylim = c(33, 46), expand = FALSE)
+
+```
+
+
+3. Subset rails and roads within the chull
+```{r load landscape features, message = FALSE, warning = FALSE}
+
+testNmkdir("exported-data/GIS")
+
+rail_chull <- st_intersection(rail, chull_buffer)
+st_write(rail_chull, file.path(here(), "exported-data", "GIS", "rail_chull.shp"), 
+         driver = "ESRI Shapefile")
+
+# Visualize landscape features and chull
+ggplot(data = states, fill = "white") +
+  geom_sf() +
+  geom_sf(data = rail_chull, alpha = 0.5, col = "black") +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-88, -68), ylim = c(33, 46), expand = FALSE)
+
+road_chull <- st_intersection(road, chull_buffer)
+st_write(road_chull, file.path(here(), "exported-data", "GIS", "road_chull.shp"), 
+         driver = "ESRI Shapefile")
+
+# Visualize landscape features and chull
+ggplot(data = states, fill = "white") +
+  geom_sf() +
+  geom_sf(data = road_chull, alpha = 0.5, col = "red") +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-88, -68), ylim = c(33, 46), expand = FALSE)
+
+```
+
+
+Intersection of roads and railroads
+
+Create a layer for the intersect of rail and road
+```{r intersect of rail and road}
+
+# Create a buffer around rail
+rail_chull <- st_read(file.path(here(), "exported-data", "GIS", "rail_chull.shp"))
+st_crs(rail_chull)$units
+rail_buffer100 <- st_buffer(rail_chull, dist = 100)
+
+# Create a buffer around roads
+road_chull <- st_read(file.path(here(), "exported-data", "GIS", "road_chull.shp"))
+st_crs(road_chull)$units
+road_buffer100 <- st_buffer(road_chull, dist = 100)
+
+
+# Their intersect: 100 m
+roadrail_intersect100 <- st_intersection(rail_buffer100, road_buffer100)
+#dissolve the polygon
+roadrail_intersect100 %<>% 
+  st_union() %>% 
+  st_transform(crs = "+proj=longlat +datum=WGS84") 
+# save the layer
+st_write(roadrail_intersect100, file.path(here(), "exported-data", "GIS", 
+                                          "roadrail100m_union.shp"), 
+         driver = "ESRI Shapefile", 
+         append = FALSE)
+
+
+ggplot(data = states, fill = "white") +
+  geom_sf() +
+  geom_sf(data = roadrail_intersect100, alpha = 0.5, col = "red") +
+  labs(x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(-88, -68), ylim = c(33, 46), expand = FALSE)
+
+```
+
+
+
+## b. Pennsylvania: High-risk locations
+
+Load data
+```{r prepare dataset of high-risk areas for PA}
+# Create a list with all files names
+files <- list.files(path = file.path(here(), "data", "high-risk-areas-PA"), 
+           pattern = NULL, all.files = FALSE,
+           full.names = T, recursive = FALSE,
+           ignore.case = FALSE, include.dirs = FALSE, no.. = FALSE)
+
+# Add all the high risk locations in a single table
+Highrisk <-  read.csv(files[1], sep=";")
+file_name <- gsub("\\.csv", "", files[1])
+Highrisk$category = gsub(paste(here(), "/data/high-risk-areas-PA/jocelynb_pa_locations_webmap_table_", sep = ""), "", file_name) 
+
+for (f in files[-1]) {
+file <- read.csv(f, sep=";")
+file_name = sub("\\.csv", "", f)
+file$category = gsub(paste(here(), "/data/high-risk-areas-PA/jocelynb_pa_locations_webmap_table_", sep = ""), "", file_name) 
+Highrisk <- rbind(Highrisk, file)
+} 
+
+# dim(Highrisk)
+unique(Highrisk$category)
+
+write.csv(Highrisk, file.path(here(), "exported-data", "highrisk_locations.csv"), row.names = F)
+
+```
+
+
+Make categories
+```{r calculate distances to high risk areas}
+
+# Make more general categories
+Highrisk <- read.csv(file.path(here(), "exported-data", "highrisk_locations.csv"))
+unique(Highrisk$category)
+
+Highrisk %<>% mutate(type = recode(category,
+                                  "fedex" = "package carriers", 
+                                  "ups" = "package carriers",
+                                  "amazonFullfilment" = "package carriers", 
+                                  "landscape" = "natural products", 
+                                  "lumberYards" = "natural products", 
+                                  "sawmill" = "natural products",
+                                  "amusementParks" = "hobbies",
+                                  "auctionCenter" = "hobbies",
+                                  "campground" = "hobbies", 
+                                  "casino" = "hobbies",
+                                  "fairgrounds" = "hobbies",
+                                  "fleamarket" = "hobbies",
+                                  "racetracks" = "hobbies",
+                                  "stadiums" = "hobbies", 
+                                  "summerCamp" = "hobbies",
+                                  "truckGarage" = "garages", 
+                                  "autoRepair" = "garages",
+                                  "boatLaunches" = "other", 
+                                  "marinas" = "other",
+                                  "movingCompanies" = "other", 
+                                  "bottlingPlants" = "other", 
+                                  "college" = "other", 
+                                  "farmerMarket" = "other", 
+                                  "truckStops" = "other",
+                                  "distributionCenter" = "other", 
+                                  "intermodal" = "other", 
+                                  "armories" = "other"))
+unique(Highrisk$type)
+
+write.csv(Highrisk, file.path(here(), "exported-data", "highrisk_cat.csv"), row.names=F)
+
+#Visualize data
+Highrisk_layer <- st_as_sf(x = Highrisk, coords = c("Longitude", "Latitude"), crs = 4269)
+Highrisk_proj <- st_transform(Highrisk_layer, crs = "ESRI:102010")
+
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = Highrisk_proj, col = "blue") +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") #+
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+```
+
+
+Create layers
+```{r make files per category}
+# Subset this file in all categories & Apply buffers around points
+unique(Highrisk_proj$type)
+
+# Level of interest: high
+# Package carriers
+packages <- Highrisk_proj %>% filter(type == "package carriers")
+packages_buffer <- st_buffer(packages, dist = 50)
+st_write(packages_buffer, file.path(here(), "exported-data", "GIS", "packages_buffer.shp"), append = F)
+dim(packages_buffer) #86
+st_crs(packages_buffer)
+
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = packages_buffer, col = "blue", size = 2) +
+    labs(x = "Longitude", y = "Latitude")#+
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+# Naturalprod
+naturalprod <- Highrisk_proj %>% filter(type == "natural products")
+dim(naturalprod)
+naturalprod_buffer <- st_buffer(naturalprod, dist = 100)
+st_write(naturalprod_buffer, file.path(here(), "exported-data", "GIS", "naturalprod_buffer.shp"), append = F)
+
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = naturalprod_buffer, col = "blue", size = 2) +
+    labs(x = "Longitude", y = "Latitude") #+
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+# Wineries
+wineries <- Highrisk_proj %>% filter(type == "winery")
+wineries_buffer <- st_buffer(wineries, dist = 100)
+st_write(wineries_buffer, file.path(here(), "exported-data", "GIS", "wineries_buffer.shp"), append = F)
+dim(wineries)
+
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = wineries_buffer, col = "blue", size = 2) +
+    labs(x = "Longitude", y = "Latitude")#+
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+
+# People hobbies
+people <- Highrisk_proj %>% filter(type == "hobbies")
+people_buffer <- st_buffer(people, dist = 100)
+st_write(people_buffer, file.path(here(), "exported-data", "GIS", "people_buffer.shp"), append = F)
+dim(people)
+
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = people_buffer, col = "blue", size = 2) +
+    labs(x = "Longitude", y = "Latitude")#+
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+# Garages, Boat, Other
+garages <- Highrisk_proj %>% filter(type == "garages")
+garages_buffer <- st_buffer(garages, dist = 50)
+st_write(garages_buffer, file.path(here(), "exported-data", "GIS", "garages_buffer.shp"), append = F)
+dim(garages)
+st_crs(garages)
+
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = garages_buffer, col = "blue", size = 2) +
+    labs(x = "Longitude", y = "Latitude")#+
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+# 
+# boats <- Highrisk_proj %>% filter(type ==  "boat")
+# boats_buffer <- st_buffer(boats, dist = 50)
+# st_write(boats_buffer, file.path(here(), "figures", "GIS", "landscape", "boats_buffer.shp"), append = F)
+# dim(boats)
+# 
+# ggplot(data = states) +
+#     geom_sf(data = states, fill = "white") +
+#   geom_sf(data = boats_buffer, col = "blue", size = 2) +
+#     labs(x = "Longitude", y = "Latitude")+
+#   coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+others <- Highrisk_proj %>% filter(type == "other")
+others_buffer <- st_buffer(others, dist = 50)
+dim(others_buffer)
+
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = others_buffer, col = "blue", size = 2) +
+    labs(x = "Longitude", y = "Latitude")#+
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+
+
+
+```    
+
+
+Load data for ports and airports
+```{r data for ports and airports}
+airports <- st_read(file.path(here(), "data", "Transports", "airports_primary_buffer.shp"), quiet = T)
+st_crs(airports)
+airports <- st_transform(airports, crs = "ESRI:102010")
+
+ports <- st_read(file.path(here(), "data", "Transports", "Ports_projected_buffer200.shp"), quiet = T)
+st_crs(ports)
+```
+
+
+Clip the form of PA for ports and airports
+```{r clip airports and ports in PA}
+
+airportsPA <- st_intersection(airports, Pennsylvania) 
+st_write(airportsPA, file.path(here(), "exported-data", "GIS", "airportsPA.shp"))
+
+# Visualize shapefiles
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = airports) +
+  geom_sf(data = airportsPA, col = "blue", size = 5) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") #+
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000))
+
+
+portsPA <- st_intersection(ports, Pennsylvania) 
+st_write(portsPA, file.path(here(), "exported-data", "GIS", "portsPA.shp"))
+
+# Visualize shapefiles
+ggplot(data = states) +
+    geom_sf(data = states, fill = "white") +
+  geom_sf(data = ports) +
+  geom_sf(data = portsPA, col = "blue", size = 5) +
+    labs(x = "Longitude", y = "Latitude")+
+    theme(legend.position="top") #+
+  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000))
+```
+
+
+
+
+
+
+# 4. Calculate the distances of each observed point from infrastructure
+
+## Full invasion range
+Distance to rail and roads
+```{r distance of SLF to transport infrastructures, eval = FALSE}
+
+# Load SLF data
+grid_chull_unique <- read.csv(file.path(here(), "exported-data", 
+                                        "grid_chull_unique.csv"))
+dim(grid_chull_unique)
+head(grid_chull_unique)
+
+# Make it a spatial layer to store distances
+# grid_transports <- st_as_sf(x = grid_chull_unique, 
+#                             coords = c("longitude_rounded", "latitude_rounded"), 
+#                             crs = "EPSG:4269", remove = F) %>% 
+#   st_transform(grid_transports, crs = "ESRI:102010")
+
+# Create rows for distances
+grid_transports %<>% add_column(DistToRail = NA,
+                          DistToRoad = NA,
+                          DistToRoadRail100 = NA)
+
+#2nd night of computation: load the file that is half filled
+grid_transports <- st_read(file.path(here(), "exported-data", "GIS",
+                                     "obs_distances_fullrange_intermediate.shp"))
+names(grid_transports) <- c("latitude_rounded", "longitude_rounded",
+                            "DistToRail", "DistToRoad", "DistToRoadRail100", "geometry")
+
+# Check that the unit is meter
+st_crs(grid_transports)$units
+
+
+# Load landscape data
+rail_chull <- st_read(file.path(here(), "exported-data", "GIS", "rail_chull.shp"), 
+                      quiet = T)
+st_crs(rail_chull)$units
+road_chull <- st_read(file.path(here(), "exported-data", "GIS", "road_chull.shp"), 
+                      quiet = T)
+st_crs(road_chull)$units
+roadrail100m <- st_read(file.path(here(), "exported-data", "GIS", "roadrail100m_union.shp"), 
+                      quiet = T) %>% 
+  st_transform(US, crs = "ESRI:102010")
+st_crs(roadrail100m)$units
+
+
+
+#Calculate their distance to transport infrastructures
+for (j in 1:length(grid_transports$DistToRail)){ 
+  # Clip a region around the point considered to limit the calculations
+  point_clip <- st_buffer(grid_transports[j,], dist = 50000)
+  
+  # Calculate distance to the closest railroad
+  rail_clip <- st_intersection(rail_chull, point_clip)
+  dist_rail <- st_distance(x = grid_transports[j,], y = rail_clip)
+  grid_transports$DistToRail[j] <- min(dist_rail)
+  rm(rail_clip)
+  
+  # Calculate distance to the closest major road
+  road_clip <- st_intersection(road_chull, point_clip)
+  dist_road <- st_distance(x = grid_transports[j,], y = road_clip)
+  grid_transports$DistToRoad[j] <- min(dist_road)
+  rm(road_clip)
+
+  # Calculate distance to the closest intersection of roads and railroads
+  intersect_clip <- st_intersection(roadrail100m, point_clip)
+  dist_int <- st_distance(x = grid_transports[j,], y = intersect_clip)
+  grid_transports$DistToRoadRail100[j] <- min(dist_int)
+  
+  rm(point_clip, intersect_clip)
+    
+  
+  if (j %% 100 == 0){
+    print(j)
+    st_write(grid_transports, file.path(here(), "exported-data", "GIS",
+                                        "obs_distances_fullrange_intermediate.shp"), 
+             driver = "ESRI Shapefile", append = FALSE)
+  }
+}
+
+sum(is.na(grid_transports$DistToRoad))
+sum(is.na(grid_transports$DistToRail))
+sum(is.na(grid_transports$DistToRoadRail100))
+
+# Save file
+st_geometry(grid_transports) <- NULL
+write.csv(grid_transports, file.path(here(), "exported-data", 
+                                     "obs_distances_fullrange.csv"), 
+          row.names = F)
+```
+
+
+Make sure all distances have been calculated
+```{r check distances}
+# Distance data
+grid_transports <- read.csv(file.path(here(), "exported-data", 
+                                      "obs_distances_fullrange.csv"), h=T)
+head(grid_transports)
+dim(grid_transports)
+
+# Check if there are points without distance
+grid_transports %>% filter(DistToRail == Inf | is.na(DistToRail))
+grid_transports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+grid_transports %>% filter(DistToRoadRail100 == Inf | is.na(DistToRoadRail100))
+
+# #Calculate the distance for points where they are missing
+# grid_transports <- st_as_sf(x = grid_data_chull, 
+#                             coords = c("longitude_rounded", "latitude_rounded"), 
+#                             crs = "EPSG:4269", remove = F)
+# grid_transports <- st_transform(grid_transports, crs = "ESRI:102010")
+#     
+# # calculate the distance for missing points
+# for (j in 1:length(grid_transports$DistToRail)){ 
+#   if (grid_transports$DistToRail[j] > 50000){
+#     print(j)
+# 
+#     # Calculate distance to the closest railroad
+#     dist_rail <- st_distance(x = grid_transports[j,], y = rail_chull)
+#     grid_transports$DistToRail[j] <- min(dist_rail)
+#   }
+#   
+#   if (grid_transports$DistToRoad[j] > 50000){
+#     print(j)
+# 
+#     # Calculate distance to the closest road
+#     dist_road <- st_distance(x = grid_transports[j,], y = road_chull)
+#     grid_transports$DistToRoad[j] <- min(dist_road)
+#   }
+# }
+# 
+# # Check result
+# grid_transports %>% filter(DistToRail == Inf | is.na(DistToRail))
+# grid_transports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+# 
+# # Save file
+# st_geometry(grid_transports) <- NULL
+# write.csv(grid_transports, file.path(here(), "exported-data", "distances_observed_transports_complete.csv"), row.names = F)
+```
+
+\newpage
+
+## Pennsylvania
+
+Calculate distances to points of interest in PA (a few hours overnight locally)
+It includes:
+- mail_buffer, people_buffer, others_buffer, wood_buffer, garages_buffer, wineries_buffer
+- airports, ports
+
+```{r distance of SLF to points of interest, eval = FALSE}
+
+# Load SLF data
+slfPA_unique <- read.csv(file.path(here(), "exported-data", "slfPA_unique.csv"), h = T)
+slfPA_unique <- st_as_sf(x = slfPA_unique, 
+                            coords = c("longitude_rounded", "latitude_rounded"),
+                            crs = "EPSG:4269", remove = F) %>% 
+  st_transform(grid_transports, crs = "ESRI:102010")
+
+
+# Load landscape data
+airportsPA <- st_read(file.path(here(), "exported-data", "GIS", "airportsPA.shp"), 
+                quiet = T)
+portsPA <- st_read(file.path(here(), "exported-data", "GIS", "portsPA.shp"), 
+                quiet = T)
+garages_buffer <- st_read(file.path(here(), "exported-data", "GIS", "garages_buffer.shp"), 
+                quiet = T)
+naturalprod_buffer <- st_read(file.path(here(), "exported-data", "GIS", "naturalprod_buffer.shp"), 
+                quiet = T)
+packages_buffer <- st_read(file.path(here(), "exported-data", "GIS", "packages_buffer.shp"), 
+                quiet = T)
+people_buffer <- st_read(file.path(here(), "exported-data", "GIS", "people_buffer.shp"), 
+                quiet = T)
+wineries_buffer <- st_read(file.path(here(), "exported-data", "GIS", "wineries_buffer.shp"), 
+                quiet = T)
+
+# Create rows for distances
+slfPA_unique %<>% add_column(DistToPackages = NA,
+                      DistToWood = NA,
+                      DistToWineries = NA,
+                      DistToHobbies = NA,
+                      DistToGarages = NA,
+                      DistToAirports = NA,
+                      DistToPorts = NA)
+
+#Calculate their distance to transport infrastructures
+for (j in 1:length(slfPA_unique$DistToPackages)){ 
+
+  # Calculate distance to the closest mail-related point
+  dist_packages <- st_distance(x = slfPA_unique[j,], y = packages_buffer)
+  slfPA_unique$DistToPackages[j] <- min(dist_packages)
+  
+  # Calculate distance to the closest wood-related point
+  dist_wood <- st_distance(x = slfPA_unique[j,], y = naturalprod_buffer)
+  slfPA_unique$DistToWood[j] <- min(dist_wood)
+  
+  # Calculate distance to the closest winery
+  dist_wine <- st_distance(x = slfPA_unique[j,], y = wineries_buffer)
+  slfPA_unique$DistToWineries[j] <- min(dist_wine)
+  
+  # Calculate distance to the closest location for people
+  dist_people <- st_distance(x = slfPA_unique[j,], y = people_buffer)
+  slfPA_unique$DistToHobbies[j] <- min(dist_people)
+  
+  # Calculate distance to the closest garage
+  dist_garage <- st_distance(x = slfPA_unique[j,], y = garages_buffer)
+  slfPA_unique$DistToGarages[j] <- min(dist_garage)
+  
+  # # Calculate distance to other infrastructures
+  # dist_others <- st_distance(x = slfPA_unique[j,], y = others_buffer)
+  # slfPA_unique$DistToOthers[j] <- min(dist_others)
+  
+  # Calculate distance to airports
+  dist_airports <- st_distance(x = slfPA_unique[j,], y = airportsPA)
+  slfPA_unique$DistToAirports[j] <- min(dist_airports)
+  
+  # Calculate distance to ports
+  dist_ports <- st_distance(x = slfPA_unique[j,], y = portsPA)
+  slfPA_unique$DistToPorts[j] <- min(dist_ports)
+  
+  if (j %% 100 == 0){
+    st_write(slfPA_unique, file.path(here(), "exported-data", "GIS",
+                                        "obs_distances_PA_intermediate.shp"), 
+             driver = "ESRI Shapefile", append = FALSE)  
+    }
+}
+
+
+# Save file
+st_geometry(slfPA_unique) <- NULL
+write.csv(slfPA_unique, file.path(here(), "exported-data", 
+                                  "obs_distances_PA.csv"), row.names = F)
+```
+
+
+Make sure all distances have been calculated
+```{r check distances}
+# Distance data
+grid_poi <- read.csv(file.path(here(), "exported-data", "obs_distances_PA.csv"), h=T)
+head(grid_poi)
+
+# Check if there are points without distance
+grid_poi %>% filter(DistToPackages == Inf | is.na(DistToPackages))
+grid_poi %>% filter(DistToWood == Inf | is.na(DistToWood))
+grid_poi %>% filter(DistToWineries == Inf | is.na(DistToWineries))
+grid_poi %>% filter(DistToHobbies == Inf | is.na(DistToHobbies))
+grid_poi %>% filter(DistToGarages == Inf | is.na(DistToGarages))
+# grid_poi %>% filter(DistToBoats == Inf | is.na(DistToBoats))
+# grid_poi %>% filter(DistToOthers == Inf | is.na(DistToOthers))
+grid_poi %>% filter(DistToAirports == Inf | is.na(DistToAirports))
+grid_poi %>% filter(DistToPorts == Inf | is.na(DistToPorts))
+
+
+# #Calculate the distance for points where they are missing
+# grid_transports <- st_as_sf(x = grid_data_chull, 
+#                             coords = c("longitude_rounded", "latitude_rounded"), 
+#                             crs = "EPSG:4269", remove = F)
+# grid_transports <- st_transform(grid_transports, crs = "ESRI:102010")
+#     
+# # calculate the distance for missing points
+# for (j in 1:length(grid_transports$DistToRail)){ 
+#   if (grid_transports$DistToRail[j] > 50000){
+#     print(j)
+# 
+#     # Calculate distance to the closest railroad
+#     dist_rail <- st_distance(x = grid_transports[j,], y = rail_chull)
+#     grid_transports$DistToRail[j] <- min(dist_rail)
+#   }
+#   
+#   if (grid_transports$DistToRoad[j] > 50000){
+#     print(j)
+# 
+#     # Calculate distance to the closest road
+#     dist_road <- st_distance(x = grid_transports[j,], y = road_chull)
+#     grid_transports$DistToRoad[j] <- min(dist_road)
+#   }
+# }
+# 
+# # Check result
+# grid_transports %>% filter(DistToRail == Inf | is.na(DistToRail))
+# grid_transports %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+# 
+# # Save file
+# st_geometry(grid_transports) <- NULL
+# write.csv(grid_transports, file.path(here(), "exported-data", "distances_observed_transports_complete.csv"), row.names = F)
+```
+
+\newpage
+
+
+
+
+# 5. Retrieve the initial SLF dataset
+
+We need to associate each point with the fact that it's a jumper, or diffuser, or negative point, by merging the table with observed distances and the table with status.
+
+
+## Full invasion range
+1. Prepare the tables
+```{r choose which dataset you are testing}
+
+grid_transports <- read.csv(file.path(here(), "exported-data", 
+                                      "obs_distances_fullrange.csv"))
+dim(grid_transports)
+head(grid_transports)
+
+# Merge it with the grid data to get the whole dataset back, including column slf established
+grid_data_chull <- read.csv(file.path(here(), "exported-data", 
+                                      "grid_data_chull.csv"))
+dim(grid_data_chull)
+head(grid_data_chull)
+
+grid_data_chull %<>% left_join(grid_transports)
+head(grid_data_chull)
+dim(grid_data_chull)
+
+# Verify if all points got a distance
+grid_data_chull %>% filter(DistToRail == Inf | is.na(DistToRail))
+grid_data_chull %>% filter(DistToRoad == Inf | is.na(DistToRoad))
+grid_data_chull %>% filter(DistIntRlRd == Inf | is.na(DistIntRlRd))
+
+# Create the categories diffusers (if established) or negatives (if not)
+grid_data_chull %<>% mutate(Category_out = ifelse(slf_established == TRUE, 
+                                                  "Diffusers", "Negatives"))
+
+# Next load the dataset that contains all jumpers identified by sets of parameters
+jumpers <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
+jumpers %<>% add_column(Category = "Jumpers")
+
+
+# Create full dataset (multiple jumps per location)
+# Put jumpers into the grid data and complete with the rest
+grid_full <- grid_data_chull %>% 
+  left_join(jumpers %>% select(latitude_rounded, longitude_rounded, 
+                               slf_established, bio_year, Category)) %>% 
+  mutate(Category = ifelse(is.na(Category), Category_out, Category)) %>% 
+  select(-Category_out)
+
+# Verify we still have the right number of jumps
+dim(grid_full %>% filter(Category == "Jumpers"))[1] == dim(jumpers)[1]
+grid_full %<>% rename(Category_full = Category)
+
+grid_full %>% group_by(Category_full) %>% count()
+```
+
+
+2. Reassemble in one long dataset with one column for the type of dataset
+```{r reassemble full and rarefied dataset}
+
+write.csv(grid_full, file.path(here(), "exported-data", "slf_observed.csv"), 
+          row.names = F)
+```
+
+\newpage
+
+## Pennsylvania
+1. Prepare the tables
+```{r choose which dataset you are testing}
+
+grid_transportsPA <- read.csv(file.path(here(), "exported-data", 
+                                      "obs_distances_PA.csv"))
+dim(grid_transportsPA)
+head(grid_transportsPA)
+
+# Merge it with the grid data to get the whole dataset back, including column slf established
+slfPA <- read.csv(file.path(here(), "exported-data", 
+                                      "slfPA.csv"))
+dim(slfPA)
+head(slfPA)
+
+slfPA %<>% left_join(grid_transportsPA)
+head(slfPA)
+dim(slfPA)
+
+# Check if there are points without distance
+slfPA %>% filter(DistToPackages == Inf | is.na(DistToPackages))
+slfPA %>% filter(DistToWood == Inf | is.na(DistToWood))
+slfPA %>% filter(DistToWineries == Inf | is.na(DistToWineries))
+slfPA %>% filter(DistToHobbies == Inf | is.na(DistToHobbies))
+slfPA %>% filter(DistToGarages == Inf | is.na(DistToGarages))
+# slfPA %>% filter(DistToBoats == Inf | is.na(DistToBoats))
+# slfPA %>% filter(DistToOthers == Inf | is.na(DistToOthers))
+slfPA %>% filter(DistToAirports == Inf | is.na(DistToAirports))
+slfPA %>% filter(DistToPorts == Inf | is.na(DistToPorts))
+
+
+# Create the categories diffusers (if established) or negatives (if not)
+slfPA %<>% mutate(Category_out = ifelse(slf_established == TRUE, 
+                                                  "Diffusers", "Negatives"))
+
+
+# Create full dataset (multiple jumps per location)
+# Put jumpers into the grid data and complete with the rest
+slfPA <- slfPA %>% 
+  left_join(jumpsPA %>% select(latitude_rounded, longitude_rounded, 
+                               slf_established, bio_year, Category)) %>% 
+  mutate(Category = ifelse(is.na(Category), Category_out, Category)) %>% 
+  select(-Category_out)
+
+# Verify we still have the right number of jumps !!! HAS TO BE PA ONLY !!!
+dim(slfPA %>% filter(Category == "Jumpers"))[1] == dim(jumpsPA)[1]
+slfPA %<>% rename(Category_full = Category)
+head(slfPA)
+
+slfPA %>% group_by(Category_full) %>% count()
+```
+
+
+2. Reassemble in one long dataset with one column for the type of dataset
+```{r reassemble full and rarefied dataset}
+
+write.csv(slfPA, file.path(here(), "exported-data", "slf_observedPA.csv"), 
+          row.names = F)
+```
+
+
+# 4. Create dataset "as of today" or "most up to date"
+
+## Full invasion range
+Count each point only once as positive or negative (summarise data for each point)
+```{r generate a grid of unique points for situation as of 2020}
+
+slf_observed <- read.csv(file.path(here(), "exported-data", "slf_observed.csv"))
+dim(slf_observed)
+
+# Show the number of duplicates per point
+slf_observed %>% group_by(latitude_rounded, longitude_rounded) %>% count() %>% 
+  group_by(n) %>% count(n)
+
+# Order the Category levels
+unique(slf_observed$Category_rarefied)
+slf_observed$Category_rarefied <- factor(slf_observed$Category_rarefied, 
+                                         levels = c("Negatives", "Diffusers", 
+                                                    "Jumpers"))
+slf_observed$Category_full <- factor(slf_observed$Category_full, 
+                                     levels = c("Negatives", "Diffusers", 
+                                                "Jumpers"))
+
+# Translate factors into ordinal
+slf_uptodate <- slf_observed %>% 
+  mutate(Category_rare_num = as.numeric(Category_rarefied),
+                    Category_full_num = as.numeric(Category_full)) %>%  
+  group_by(latitude_rounded, longitude_rounded, DistToRail, DistToRoad, DistIntRlRd) %>% 
+  summarize(Category_rare_max = max(Category_rare_num),
+            Category_full_max = max(Category_full_num)) %>% 
+  mutate(Category_rare = recode(Category_rare_max, "1" = "Negatives", 
+                                "2" = "Diffusers", "3" = "Jumpers"),
+         Category_full = recode(Category_full_max, "1" = "Negatives", 
+                                "2" = "Diffusers", "3" = "Jumpers")) %>% 
+  select(-Category_rare_max, -Category_full_max)
+  
+
+dim(slf_uptodate) #32,911
+head(slf_uptodate)
+
+# Save this file
+write.csv(slf_uptodate, 
+          file.path(here(), "exported-data", "slf_obs_uptodate.csv"), 
+          row.names=F)
+```
+
+
+
+## Pennsylvania
+```{r generate a grid of unique points for situation as of 2020}
+
+slf_observedPA <- read.csv(file.path(here(), "exported-data", "slf_observedPA.csv"))
+dim(slf_observedPA)
+
+# Show the number of duplicates per point
+slf_observedPA %>% 
+  group_by(latitude_rounded, longitude_rounded) %>% 
+  count() %>% 
+  group_by(n) %>% count(n)
+
+# Order the Category levels
+unique(slf_observedPA$Category_full)
+slf_observedPA$Category_full <- factor(slf_observedPA$Category_full, 
+                                     levels = c("Negatives", "Diffusers", 
+                                                "Jumpers"))
+
+# Remove unused columns
+slf_observedPA %<>% select(bio_year, latitude_rounded, longitude_rounded, slf_established, 
+                           DistToPackages, DistToWood, DistToWineries,
+                           DistToHobbies, DistToGarages, DistToAirports, DistToPorts,
+                           Category_full)
+
+# Translate factors into ordinal
+slf_uptodatePA <- slf_observedPA %>% 
+  mutate(#Category_rare_num = as.numeric(Category_rarefied),
+                    Category_full_num = as.numeric(Category_full)) %>%  
+  # here we translate the factor "category" into a numeric factor to ordinate the factor
+  # so that we can use the "maximum" value later to keep the most appropriate category
+  group_by(latitude_rounded, longitude_rounded, 
+           DistToPackages, DistToWood, DistToWineries,
+           DistToHobbies, DistToGarages, DistToAirports, DistToPorts) %>% 
+  summarize(#Category_rare_max = max(Category_rare_num),
+            Category_full_max = max(Category_full_num)) %>% 
+  mutate(#Category_rare = recode(Category_rare_max, "1" = "Negatives", 
+                                # "2" = "Diffusers", "3" = "Jumpers"),
+         Category_full = recode(Category_full_max, "1" = "Negatives", 
+                                "2" = "Diffusers", "3" = "Jumpers")) %>% 
+  select(#-Category_rare_max, 
+         -Category_full_max)
+  
+
+dim(slf_uptodatePA) #20.259
+head(slf_uptodatePA)
+
+# Save this file
+write.csv(slf_uptodatePA, 
+          file.path(here(), "exported-data", "slf_obs_uptodatePA.csv"), 
+          row.names=F)
+```
