@@ -33,17 +33,15 @@ For this second vignette, we want to prepare all the spatial layers as well as t
 
 library(tidyverse)
 library(sf)
-library(spData)
-# library(RVAideMemoire)
+# library(spData)
 library(dplyr)
-library(gridExtra)
+# library(gridExtra)
 library(magrittr)
-# library(purrr)
 library(here)
-# library(FSA)
-library(ape)
-library(spdep)
+# library(ape)
+# library(spdep)
 library(leaflet)
+library(slfjumps)
 
 sf::sf_use_s2(FALSE)
 ```
@@ -140,7 +138,7 @@ st_write(hull, file.path(here(), "figures", "GIS", "chull.shp"),
 
 2. Keep only the points that are in the chull
 ```{r subset grid data}
-dim(grid_data) #58144
+dim(grid_data) #58331
 dim(grid_data %>% filter(slf_established)) #7044
 st_crs(grid_data)
 grid_data <- st_transform(grid_data, crs = "ESRI:102010")
@@ -278,7 +276,7 @@ ggplot(data = US, fill = "white") +
   coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
 ```
 
-In grid data
+Clip grid data
 ```{r clip grid data in PA}
 
 slfPA <- st_intersection(grid_chull_layer, Pennsylvania) 
@@ -375,7 +373,7 @@ st_crs(road)
 ```
 
 
-2. Make a buffer around the chull to subset the lansdscape features
+2. Make a buffer around the chull to subset the landscape features
 We use a buffer because for points close to the border of the chull, the closest rail or road might be outside of the chull
 ```{r buffer around chull, message = FALSE, warning = FALSE}
 
@@ -503,33 +501,43 @@ Highrisk <- read.csv(file.path(here(), "exported-data", "highrisk_locations.csv"
 unique(Highrisk$category)
 
 Highrisk %<>% mutate(type = recode(category,
-                                  "fedex" = "package carriers", 
-                                  "ups" = "package carriers",
-                                  "amazonFullfilment" = "package carriers", 
-                                  "landscape" = "natural products", 
-                                  "lumberYards" = "natural products", 
-                                  "sawmill" = "natural products",
-                                  "amusementParks" = "hobbies",
-                                  "auctionCenter" = "hobbies",
-                                  "campground" = "hobbies", 
-                                  "casino" = "hobbies",
-                                  "fairgrounds" = "hobbies",
-                                  "fleamarket" = "hobbies",
-                                  "racetracks" = "hobbies",
-                                  "stadiums" = "hobbies", 
-                                  "summerCamp" = "hobbies",
-                                  "truckGarage" = "garages", 
-                                  "autoRepair" = "garages",
+                                   # car and good movements SLF can hitchhike on
+                                  "fedex" = "Package transportation", 
+                                  "ups" = "Package transportation",
+                                  "amazonFullfilment" = "Package transportation", 
+                                  "movingCompanies" = "Package transportation",
+                                  
+                                  # movement of goods SLF can lay eggs on
+                                  "landscape" = "Transportation of natural products", 
+                                  "lumberYards" = "Transportation of natural products", 
+                                  "sawmill" = "Transportation of natural products",
+                                  
+                                  "intermodal" = "Railyards", # goes with railroads
+                                  "winery" = "Wineries",
+                                  
+                                  # massive car movements SLF can hitchhike on
+                                  "amusementParks" = "Gathering of people",
+                                  "auctionCenter" = "Gathering of people",
+                                  "campground" = "Gathering of people", 
+                                  "casino" = "Gathering of people",
+                                  "fairgrounds" = "Gathering of people",
+                                  "fleamarket" = "Gathering of people",
+                                  "racetracks" = "Gathering of people",
+                                  "stadiums" = "Gathering of people", 
+                                  "summerCamp" = "Gathering of people",
+                                  
+                                  # Miscellaneous
+                                  "distributionCenter" = "other",
                                   "boatLaunches" = "other", 
                                   "marinas" = "other",
-                                  "movingCompanies" = "other", 
+                                  "truckGarage" = "other", 
+                                  "autoRepair" = "other",
+                                  "truckStops" = "other",
                                   "bottlingPlants" = "other", 
                                   "college" = "other", 
                                   "farmerMarket" = "other", 
-                                  "truckStops" = "other",
-                                  "distributionCenter" = "other", 
-                                  "intermodal" = "other", 
-                                  "armories" = "other"))
+                                  "armories" = "other" 
+                                  ))
 unique(Highrisk$type)
 
 write.csv(Highrisk, file.path(here(), "exported-data", "highrisk_cat.csv"), row.names=F)
@@ -554,7 +562,7 @@ unique(Highrisk_proj$type)
 
 # Level of interest: high
 # Package carriers
-packages <- Highrisk_proj %>% filter(type == "package carriers")
+packages <- Highrisk_proj %>% filter(type == "Package transportation")
 packages_buffer <- st_buffer(packages, dist = 50)
 st_write(packages_buffer, file.path(here(), "exported-data", "GIS", "packages_buffer.shp"), append = F)
 dim(packages_buffer) #86
@@ -568,7 +576,7 @@ ggplot(data = states) +
 
 
 # Naturalprod
-naturalprod <- Highrisk_proj %>% filter(type == "natural products")
+naturalprod <- Highrisk_proj %>% filter(type == "Transportation of natural products")
 dim(naturalprod)
 naturalprod_buffer <- st_buffer(naturalprod, dist = 100)
 st_write(naturalprod_buffer, file.path(here(), "exported-data", "GIS", "naturalprod_buffer.shp"), append = F)
@@ -581,7 +589,7 @@ ggplot(data = states) +
 
 
 # Wineries
-wineries <- Highrisk_proj %>% filter(type == "winery")
+wineries <- Highrisk_proj %>% filter(type == "Wineries")
 wineries_buffer <- st_buffer(wineries, dist = 100)
 st_write(wineries_buffer, file.path(here(), "exported-data", "GIS", "wineries_buffer.shp"), append = F)
 dim(wineries)
@@ -595,7 +603,7 @@ ggplot(data = states) +
 
 
 # People hobbies
-people <- Highrisk_proj %>% filter(type == "hobbies")
+people <- Highrisk_proj %>% filter(type == "Gathering of people")
 people_buffer <- st_buffer(people, dist = 100)
 st_write(people_buffer, file.path(here(), "exported-data", "GIS", "people_buffer.shp"), append = F)
 dim(people)
@@ -607,42 +615,16 @@ ggplot(data = states) +
   coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
 
 
-# Garages, Boat, Other
-garages <- Highrisk_proj %>% filter(type == "garages")
-garages_buffer <- st_buffer(garages, dist = 50)
-st_write(garages_buffer, file.path(here(), "exported-data", "GIS", "garages_buffer.shp"), append = F)
-dim(garages)
-st_crs(garages)
+# Railyards
+railyards <- Highrisk_proj %>% filter(type == "Railyards")
+railyards_buffer <- st_buffer(railyards, dist = 100)
+st_write(people_buffer, file.path(here(), "exported-data", "GIS", "railyards_buffer.shp"), append = F)
+dim(railyards)
 
 ggplot(data = states) +
     geom_sf(data = states, fill = "white") +
-  geom_sf(data = garages_buffer, col = "blue", size = 2) +
-    labs(x = "Longitude", y = "Latitude")#+
-  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
-
-
-# 
-# boats <- Highrisk_proj %>% filter(type ==  "boat")
-# boats_buffer <- st_buffer(boats, dist = 50)
-# st_write(boats_buffer, file.path(here(), "figures", "GIS", "landscape", "boats_buffer.shp"), append = F)
-# dim(boats)
-# 
-# ggplot(data = states) +
-#     geom_sf(data = states, fill = "white") +
-#   geom_sf(data = boats_buffer, col = "blue", size = 2) +
-#     labs(x = "Longitude", y = "Latitude")+
-#   coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
-
-
-others <- Highrisk_proj %>% filter(type == "other")
-others_buffer <- st_buffer(others, dist = 50)
-dim(others_buffer)
-
-ggplot(data = states) +
-    geom_sf(data = states, fill = "white") +
-  geom_sf(data = others_buffer, col = "blue", size = 2) +
-    labs(x = "Longitude", y = "Latitude")#+
-  coord_sf(xlim = c(1000000, 2000000), ylim = c(-200000, 600000), expand = FALSE)
+  geom_sf(data = railyards_buffer, col = "blue", size = 2) +
+    labs(x = "Longitude", y = "Latitude")
 
 
 
@@ -664,7 +646,8 @@ Clip the form of PA for ports and airports
 ```{r clip airports and ports in PA}
 
 airportsPA <- st_intersection(airports, Pennsylvania) 
-st_write(airportsPA, file.path(here(), "exported-data", "GIS", "airportsPA.shp"))
+st_write(airportsPA, file.path(here(), "exported-data", "GIS", "airportsPA.shp"), 
+         append = FALSE)
 
 # Visualize shapefiles
 ggplot(data = states) +
@@ -677,7 +660,8 @@ ggplot(data = states) +
 
 
 portsPA <- st_intersection(ports, Pennsylvania) 
-st_write(portsPA, file.path(here(), "exported-data", "GIS", "portsPA.shp"))
+st_write(portsPA, file.path(here(), "exported-data", "GIS", "portsPA.shp"), 
+         append = FALSE)
 
 # Visualize shapefiles
 ggplot(data = states) +
@@ -720,6 +704,7 @@ grid_transports %<>% add_column(DistToRail = NA,
 #2nd night of computation: load the file that is half filled
 grid_transports <- st_read(file.path(here(), "exported-data", "GIS",
                                      "obs_distances_fullrange_intermediate.shp"))
+grid_transports[19600,]
 names(grid_transports) <- c("latitude_rounded", "longitude_rounded",
                             "DistToRail", "DistToRoad", "DistToRoadRail100", "geometry")
 
@@ -742,7 +727,7 @@ st_crs(roadrail100m)$units
 
 
 #Calculate their distance to transport infrastructures
-for (j in 1:length(grid_transports$DistToRail)){ 
+for (j in 19600:length(grid_transports$DistToRail)){ 
   # Clip a region around the point considered to limit the calculations
   point_clip <- st_buffer(grid_transports[j,], dist = 50000)
   
@@ -850,32 +835,35 @@ slfPA_unique <- st_as_sf(x = slfPA_unique,
                             coords = c("longitude_rounded", "latitude_rounded"),
                             crs = "EPSG:4269", remove = F) %>% 
   st_transform(grid_transports, crs = "ESRI:102010")
-
+dim(slfPA_unique)
 
 # Load landscape data
 airportsPA <- st_read(file.path(here(), "exported-data", "GIS", "airportsPA.shp"), 
                 quiet = T)
 portsPA <- st_read(file.path(here(), "exported-data", "GIS", "portsPA.shp"), 
                 quiet = T)
-garages_buffer <- st_read(file.path(here(), "exported-data", "GIS", "garages_buffer.shp"), 
+packages_buffer <- st_read(file.path(here(), "exported-data", "GIS", "packages_buffer.shp"), 
                 quiet = T)
 naturalprod_buffer <- st_read(file.path(here(), "exported-data", "GIS", "naturalprod_buffer.shp"), 
-                quiet = T)
-packages_buffer <- st_read(file.path(here(), "exported-data", "GIS", "packages_buffer.shp"), 
                 quiet = T)
 people_buffer <- st_read(file.path(here(), "exported-data", "GIS", "people_buffer.shp"), 
                 quiet = T)
 wineries_buffer <- st_read(file.path(here(), "exported-data", "GIS", "wineries_buffer.shp"), 
                 quiet = T)
+railyards_buffer <- st_read(file.path(here(), "exported-data", "GIS", "railyards_buffer.shp"), 
+                quiet = T)
+
+
+
 
 # Create rows for distances
-slfPA_unique %<>% add_column(DistToPackages = NA,
-                      DistToWood = NA,
+slfPA_unique %<>% add_column(DistToAirports = NA,
+                      DistToPorts = NA,
+                      DistToPackages = NA,
+                      DistToNatProd = NA,
                       DistToWineries = NA,
-                      DistToHobbies = NA,
-                      DistToGarages = NA,
-                      DistToAirports = NA,
-                      DistToPorts = NA)
+                      DistToPeople = NA,
+                      DistToRailyard = NA)
 
 #Calculate their distance to transport infrastructures
 for (j in 1:length(slfPA_unique$DistToPackages)){ 
@@ -885,8 +873,8 @@ for (j in 1:length(slfPA_unique$DistToPackages)){
   slfPA_unique$DistToPackages[j] <- min(dist_packages)
   
   # Calculate distance to the closest wood-related point
-  dist_wood <- st_distance(x = slfPA_unique[j,], y = naturalprod_buffer)
-  slfPA_unique$DistToWood[j] <- min(dist_wood)
+  dist_natprod <- st_distance(x = slfPA_unique[j,], y = naturalprod_buffer)
+  slfPA_unique$DistToNatProd[j] <- min(dist_natprod)
   
   # Calculate distance to the closest winery
   dist_wine <- st_distance(x = slfPA_unique[j,], y = wineries_buffer)
@@ -894,15 +882,11 @@ for (j in 1:length(slfPA_unique$DistToPackages)){
   
   # Calculate distance to the closest location for people
   dist_people <- st_distance(x = slfPA_unique[j,], y = people_buffer)
-  slfPA_unique$DistToHobbies[j] <- min(dist_people)
+  slfPA_unique$DistToPeople[j] <- min(dist_people)
   
   # Calculate distance to the closest garage
-  dist_garage <- st_distance(x = slfPA_unique[j,], y = garages_buffer)
-  slfPA_unique$DistToGarages[j] <- min(dist_garage)
-  
-  # # Calculate distance to other infrastructures
-  # dist_others <- st_distance(x = slfPA_unique[j,], y = others_buffer)
-  # slfPA_unique$DistToOthers[j] <- min(dist_others)
+  dist_railyard <- st_distance(x = slfPA_unique[j,], y = railyards_buffer)
+  slfPA_unique$DistToRailyard[j] <- min(dist_railyard)
   
   # Calculate distance to airports
   dist_airports <- st_distance(x = slfPA_unique[j,], y = airportsPA)
@@ -913,6 +897,7 @@ for (j in 1:length(slfPA_unique$DistToPackages)){
   slfPA_unique$DistToPorts[j] <- min(dist_ports)
   
   if (j %% 100 == 0){
+    print(j)
     st_write(slfPA_unique, file.path(here(), "exported-data", "GIS",
                                         "obs_distances_PA_intermediate.shp"), 
              driver = "ESRI Shapefile", append = FALSE)  
@@ -935,12 +920,10 @@ head(grid_poi)
 
 # Check if there are points without distance
 grid_poi %>% filter(DistToPackages == Inf | is.na(DistToPackages))
-grid_poi %>% filter(DistToWood == Inf | is.na(DistToWood))
+grid_poi %>% filter(DistToNatProd == Inf | is.na(DistToNatProd))
 grid_poi %>% filter(DistToWineries == Inf | is.na(DistToWineries))
-grid_poi %>% filter(DistToHobbies == Inf | is.na(DistToHobbies))
-grid_poi %>% filter(DistToGarages == Inf | is.na(DistToGarages))
-# grid_poi %>% filter(DistToBoats == Inf | is.na(DistToBoats))
-# grid_poi %>% filter(DistToOthers == Inf | is.na(DistToOthers))
+grid_poi %>% filter(DistToPeople == Inf | is.na(DistToPeople))
+grid_poi %>% filter(DistToRailyard == Inf | is.na(DistToRailyard))
 grid_poi %>% filter(DistToAirports == Inf | is.na(DistToAirports))
 grid_poi %>% filter(DistToPorts == Inf | is.na(DistToPorts))
 
@@ -990,7 +973,6 @@ We need to associate each point with the fact that it's a jumper, or diffuser, o
 
 
 ## Full invasion range
-1. Prepare the tables
 ```{r choose which dataset you are testing}
 
 grid_transports <- read.csv(file.path(here(), "exported-data", 
@@ -1011,15 +993,15 @@ dim(grid_data_chull)
 # Verify if all points got a distance
 grid_data_chull %>% filter(DistToRail == Inf | is.na(DistToRail))
 grid_data_chull %>% filter(DistToRoad == Inf | is.na(DistToRoad))
-grid_data_chull %>% filter(DistIntRlRd == Inf | is.na(DistIntRlRd))
+grid_data_chull %>% filter(DistToRoadRail100 == Inf | is.na(DistToRoadRail100))
 
 # Create the categories diffusers (if established) or negatives (if not)
 grid_data_chull %<>% mutate(Category_out = ifelse(slf_established == TRUE, 
-                                                  "Diffusers", "Negatives"))
+                                                  "Diffusion", "Negatives"))
 
 # Next load the dataset that contains all jumpers identified by sets of parameters
-jumpers <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
-jumpers %<>% add_column(Category = "Jumpers")
+jumpers <- read.csv(file.path(here(), "exported-data", "jumps.csv"))
+jumpers %<>% add_column(Category = "Jumps")
 
 
 # Create full dataset (multiple jumps per location)
@@ -1031,30 +1013,24 @@ grid_full <- grid_data_chull %>%
   select(-Category_out)
 
 # Verify we still have the right number of jumps
-dim(grid_full %>% filter(Category == "Jumpers"))[1] == dim(jumpers)[1]
-grid_full %<>% rename(Category_full = Category)
-
-grid_full %>% group_by(Category_full) %>% count()
-```
-
-
-2. Reassemble in one long dataset with one column for the type of dataset
-```{r reassemble full and rarefied dataset}
+dim(grid_full %>% filter(Category == "Jumps"))[1] == dim(jumpers)[1]
+grid_full %>% group_by(Category) %>% count()
 
 write.csv(grid_full, file.path(here(), "exported-data", "slf_observed.csv"), 
           row.names = F)
 ```
 
+
 \newpage
 
 ## Pennsylvania
-1. Prepare the tables
 ```{r choose which dataset you are testing}
 
 grid_transportsPA <- read.csv(file.path(here(), "exported-data", 
                                       "obs_distances_PA.csv"))
 dim(grid_transportsPA)
 head(grid_transportsPA)
+
 
 # Merge it with the grid data to get the whole dataset back, including column slf established
 slfPA <- read.csv(file.path(here(), "exported-data", 
@@ -1068,23 +1044,23 @@ dim(slfPA)
 
 # Check if there are points without distance
 slfPA %>% filter(DistToPackages == Inf | is.na(DistToPackages))
-slfPA %>% filter(DistToWood == Inf | is.na(DistToWood))
+slfPA %>% filter(DistToNatProd == Inf | is.na(DistToNatProd))
 slfPA %>% filter(DistToWineries == Inf | is.na(DistToWineries))
-slfPA %>% filter(DistToHobbies == Inf | is.na(DistToHobbies))
-slfPA %>% filter(DistToGarages == Inf | is.na(DistToGarages))
-# slfPA %>% filter(DistToBoats == Inf | is.na(DistToBoats))
-# slfPA %>% filter(DistToOthers == Inf | is.na(DistToOthers))
+slfPA %>% filter(DistToPeople == Inf | is.na(DistToPeople))
+slfPA %>% filter(DistToRailyard == Inf | is.na(DistToRailyard))
 slfPA %>% filter(DistToAirports == Inf | is.na(DistToAirports))
 slfPA %>% filter(DistToPorts == Inf | is.na(DistToPorts))
 
-
 # Create the categories diffusers (if established) or negatives (if not)
 slfPA %<>% mutate(Category_out = ifelse(slf_established == TRUE, 
-                                                  "Diffusers", "Negatives"))
-
+                                                  "Diffusion", "Negatives"))
 
 # Create full dataset (multiple jumps per location)
 # Put jumpers into the grid data and complete with the rest
+jumpsPA <- read.csv(file.path(here(), "exported-data", "jumpsPA.csv"))
+jumpsPA %<>% mutate(Category = "Jumps")
+dim(jumpsPA)
+
 slfPA <- slfPA %>% 
   left_join(jumpsPA %>% select(latitude_rounded, longitude_rounded, 
                                slf_established, bio_year, Category)) %>% 
@@ -1092,19 +1068,15 @@ slfPA <- slfPA %>%
   select(-Category_out)
 
 # Verify we still have the right number of jumps !!! HAS TO BE PA ONLY !!!
-dim(slfPA %>% filter(Category == "Jumpers"))[1] == dim(jumpsPA)[1]
-slfPA %<>% rename(Category_full = Category)
+dim(slfPA %>% filter(Category == "Jumps"))[1] == dim(jumpsPA)[1]
+unique(slfPA$Category)
 head(slfPA)
 
-slfPA %>% group_by(Category_full) %>% count()
-```
-
-
-2. Reassemble in one long dataset with one column for the type of dataset
-```{r reassemble full and rarefied dataset}
+slfPA %>% group_by(Category) %>% count()
 
 write.csv(slfPA, file.path(here(), "exported-data", "slf_observedPA.csv"), 
           row.names = F)
+
 ```
 
 
@@ -1115,36 +1087,30 @@ Count each point only once as positive or negative (summarise data for each poin
 ```{r generate a grid of unique points for situation as of 2020}
 
 slf_observed <- read.csv(file.path(here(), "exported-data", "slf_observed.csv"))
-dim(slf_observed)
+dim(slf_observed) #45798
 
 # Show the number of duplicates per point
 slf_observed %>% group_by(latitude_rounded, longitude_rounded) %>% count() %>% 
   group_by(n) %>% count(n)
 
 # Order the Category levels
-unique(slf_observed$Category_rarefied)
-slf_observed$Category_rarefied <- factor(slf_observed$Category_rarefied, 
-                                         levels = c("Negatives", "Diffusers", 
-                                                    "Jumpers"))
-slf_observed$Category_full <- factor(slf_observed$Category_full, 
-                                     levels = c("Negatives", "Diffusers", 
-                                                "Jumpers"))
+unique(slf_observed$Category)
+slf_observed$Category <- factor(slf_observed$Category, 
+                                     levels = c("Negatives", "Diffusion", 
+                                                "Jumps"))
 
 # Translate factors into ordinal
 slf_uptodate <- slf_observed %>% 
-  mutate(Category_rare_num = as.numeric(Category_rarefied),
-                    Category_full_num = as.numeric(Category_full)) %>%  
-  group_by(latitude_rounded, longitude_rounded, DistToRail, DistToRoad, DistIntRlRd) %>% 
-  summarize(Category_rare_max = max(Category_rare_num),
-            Category_full_max = max(Category_full_num)) %>% 
-  mutate(Category_rare = recode(Category_rare_max, "1" = "Negatives", 
-                                "2" = "Diffusers", "3" = "Jumpers"),
-         Category_full = recode(Category_full_max, "1" = "Negatives", 
-                                "2" = "Diffusers", "3" = "Jumpers")) %>% 
-  select(-Category_rare_max, -Category_full_max)
+  mutate(Category_num = as.numeric(Category)) %>%  
+  group_by(latitude_rounded, longitude_rounded, DistToRail, DistToRoad, DistToRoadRail100) %>% 
+  summarize(Category_max = max(Category_num)) %>% 
+  mutate(Category = recode(Category_max, "1" = "Negatives", 
+                           "2" = "Diffusion", 
+                           "3" = "Jumps")) %>% 
+  select(-Category_max)
   
 
-dim(slf_uptodate) #32,911
+dim(slf_uptodate) #32,756
 head(slf_uptodate)
 
 # Save this file
@@ -1168,34 +1134,29 @@ slf_observedPA %>%
   group_by(n) %>% count(n)
 
 # Order the Category levels
-unique(slf_observedPA$Category_full)
-slf_observedPA$Category_full <- factor(slf_observedPA$Category_full, 
-                                     levels = c("Negatives", "Diffusers", 
-                                                "Jumpers"))
+unique(slf_observedPA$Category)
+slf_observedPA$Category <- factor(slf_observedPA$Category, 
+                                     levels = c("Negatives", "Diffusion", 
+                                                "Jumps"))
 
 # Remove unused columns
 slf_observedPA %<>% select(bio_year, latitude_rounded, longitude_rounded, slf_established, 
-                           DistToPackages, DistToWood, DistToWineries,
-                           DistToHobbies, DistToGarages, DistToAirports, DistToPorts,
-                           Category_full)
+                           DistToPackages, DistToNatProd, DistToWineries,
+                           DistToPeople, DistToRailyard, DistToAirports, DistToPorts,
+                           Category)
 
 # Translate factors into ordinal
 slf_uptodatePA <- slf_observedPA %>% 
-  mutate(#Category_rare_num = as.numeric(Category_rarefied),
-                    Category_full_num = as.numeric(Category_full)) %>%  
+  mutate(Category_num = as.numeric(Category)) %>%  
   # here we translate the factor "category" into a numeric factor to ordinate the factor
   # so that we can use the "maximum" value later to keep the most appropriate category
   group_by(latitude_rounded, longitude_rounded, 
-           DistToPackages, DistToWood, DistToWineries,
-           DistToHobbies, DistToGarages, DistToAirports, DistToPorts) %>% 
-  summarize(#Category_rare_max = max(Category_rare_num),
-            Category_full_max = max(Category_full_num)) %>% 
-  mutate(#Category_rare = recode(Category_rare_max, "1" = "Negatives", 
-                                # "2" = "Diffusers", "3" = "Jumpers"),
-         Category_full = recode(Category_full_max, "1" = "Negatives", 
-                                "2" = "Diffusers", "3" = "Jumpers")) %>% 
-  select(#-Category_rare_max, 
-         -Category_full_max)
+           DistToPackages, DistToNatProd, DistToWineries,
+                           DistToPeople, DistToRailyard, DistToAirports, DistToPorts) %>% 
+  summarize(Category_max = max(Category_num)) %>% 
+  mutate(Category = recode(Category_max, "1" = "Negatives", 
+                                "2" = "Diffusion", "3" = "Jumps")) %>% 
+  select(-Category_max)
   
 
 dim(slf_uptodatePA) #20.259
@@ -1204,5 +1165,5 @@ head(slf_uptodatePA)
 # Save this file
 write.csv(slf_uptodatePA, 
           file.path(here(), "exported-data", "slf_obs_uptodatePA.csv"), 
-          row.names=F)
+          row.names = F)
 ```

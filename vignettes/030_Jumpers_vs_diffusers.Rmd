@@ -14,206 +14,500 @@ Our working hypotheses are:
 (2) The infrastructure where SLF dispersed is situated less than 100 m from where SLF were found
 (3) Jumps will be found closer to infrastructures specific to jump dispersal than diffusive points and negatives. This also makes sure that surveys are not conducted mostly close to transport infrastructures.
 
+## Load packages
+```{r states names and centroid for global map, message = FALSE, warning = FALSE, echo = params$display}
 
-# 1. Closest infrastructure 
+library(tidyverse)
+library(sf)
+library(lme4)
+library(RVAideMemoire)
+# library(spData)
+library(dplyr)
+# library(gridExtra)
+library(magrittr)
+library(here)
+# library(ape)
+library(spdep)
+library(leaflet)
+library(slfjumps)
 
+sf::sf_use_s2(FALSE)
+```
+
+
+# 1a. Closest infrastructure 
+
+## Full range
 Get the closest infrastructure
 ```{r choose which dataset you are testing}
 
-#TODO
-slf_obs_PA <- read.csv(file.path(here(), "exported-data", "obs_distances_PA.csv"), h = T)
+slf_obs <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"), h = T)
+head(slf_obs)
+
+slf_long <- slf_obs %>%
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+
+# Find the closest POI
+slf_min <- slf_long %>% group_by(latitude_rounded, longitude_rounded, Category) %>% 
+  summarise(distmin = DistanceType[which.min(DistanceValue)]) 
+
+# Calculate proportions
+prop_fullrange <- slf_min %>% group_by(Category, distmin) %>% 
+  summarise(n = n())
+
+
+# Chi-square test:
+chisq.table <- pivot_wider(prop_fullrange,
+                           names_from = distmin, values_from = n)
+# Replace NAs by 0 if necessary
+chisq.table[is.na(chisq.table)] <- 0
+# Test diffusers-jumps:
+chisq_diff <- chisq.test(chisq.table[c(1,2),2:4])
+#X-squared = 24.619, df = 2, p-value = 4.51e-06
+chisq_neg <- chisq.test(chisq.table[c(2,3),2:4])
+#X-squared = 49.937, df = 2, p-value = 1.433e-11
+
+
+# Manually check proportions
+round(chisq_diff$observed[1,]/sum(chisq_diff$observed[1,]),2) #Proportions for diffusers
+round(chisq_diff$observed[2,]/sum(chisq_diff$observed[2,]),2) #Proportions for jumps
+round(chisq_neg$observed[2,]/sum(chisq_neg$observed[2,]),2)# Proportions for negatives
+# totals <- prop_fullrange %>% group_by(Category) %>% summarise(total = sum(n))
+# chisq.table %<>% left_join(totals) 
+dim(slf_obs)[1] ==  dim(slf_min)[1]
+
+
+# Visualize it
+slf_min$Category <- factor(slf_min$Category, levels = c("Jumps", "Diffusion", "Negatives")) 
+
+categ_representation <- ggplot(slf_min) +
+  geom_bar(aes(y = reorder(distmin, distmin,
+                           function(y)-length(y)), fill = Category), 
+           position = position_dodge(), show.legend = F) +
+  facet_wrap(~ Category, scales = "free_x") +
+  scale_fill_brewer(palette = "Dark2") +
+  ylab("Nearest transport infrastructure") +
+  xlab("Number of jumps") +
+  scale_y_discrete(labels = c("Major road", "Railroad", "Both")) +
+  theme_classic()
+
+# ggsave(file.path(here(), "figures", "vignette_highrisk", "category_representation_full_chull_all.jpg"), categ_representation,
+       # width = 10, height = 3)
+
+
+
+# Calculate effect size = divide by negatives
+prop_ES <- prop_fullrange %>% pivot_wider(names_from = "Category", 
+                          values_from = "n") %>% 
+  mutate(Jump_eff = Jumps/Negatives)
+
+
+ggplot(prop_ES) +
+  geom_col(aes(x = distmin, y = Jump_eff),
+           show.legend = F) +
+  # scale_fill_brewer(palette = "Dark2") +
+  ylab("Effect size") +
+  xlab("Infrastructure type") +
+  theme_classic()
+
+```
+
+
+## PA
+Get the closest infrastructure
+```{r choose which dataset you are testing}
+
+slf_obs_PA <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodatePA.csv"), h = T)
 head(slf_obs_PA)
 
 slfPA_long <- slf_obs_PA %>%
   pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
 
 # Find the closest POI
-slfPA_min <- slfPA_long %>% group_by(latitude_rounded, longitude_rounded
-                                     # , Category_full
-                                     ) %>% 
+slfPA_min <- slfPA_long %>% group_by(latitude_rounded, longitude_rounded, Category) %>% 
   summarise(distmin = DistanceType[which.min(DistanceValue)]) 
 
-
 # Calculate proportions
-prop_full <- slfPA_min %>% group_by(#Category_full, 
-  distmin) %>% summarise(n = n())
+prop_PA <- slfPA_min %>% group_by(Category, distmin) %>% 
+  summarise(n = n())
 
 
-chisq.table <- dcast(Category_full ~ distmin, data = prop_full)
+# Chi-square test:
+
+chisq.table <- pivot_wider(prop_PA,
+                           names_from = distmin, values_from = n)
+# Replace NAs by 0 if necessary
 chisq.table[is.na(chisq.table)] <- 0
+# Test diffusers-jumps:
+chisq_diff <- chisq.test(chisq.table[c(1,2),2:7])
+#X-squared = 19.208, df = 5, p-value = 0.001758
+chisq_neg <- chisq.test(chisq.table[c(2,3),2:7])
+#X-squared = 35.281, df = 5, p-value = 1.322e-06
 
-# Test
-results <- chisq.test(chisq.table[c(1,2),2:18])
-#Diff-Jump: X-squared = 69.837, df = 16, p-value = 1.066e-08
-#Diff-Neg: X-squared = 272.88, df = 16, p-value < 2.2e-16
 
-
-round(results$expected,0)
-results$observed[2,]
-round(results$observed[1,]/sum(results$observed[1,]),2) #Diffusers
-round(results$observed[2,]/sum(results$observed[2,]),2) #Jumpers or negatives
-totals <- prop_full %>% group_by(Category_full) %>% summarise(total = sum(n))
-chisq.table %<>% left_join(totals) 
-slfPA_min$Category_full <- factor(slfPA_min$Category_full, levels = c("Jumpers", "Diffusers", "Negatives")) 
-dim(slfPA_uptodate)[1] ==  dim(slfPA_min)[1]
+# Manually check proportions
+round(chisq_diff$observed[1,]/sum(chisq_diff$observed[1,]),2) #Proportions for diffusers
+round(chisq_diff$observed[2,]/sum(chisq_diff$observed[2,]),2) #Proportions for jumps
+round(chisq_neg$observed[2,]/sum(chisq_neg$observed[2,]),2)# Proportions for negatives
+# totals <- prop_fullrange %>% group_by(Category) %>% summarise(total = sum(n))
+# chisq.table %<>% left_join(totals) 
+dim(slf_obs_PA)[1] ==  dim(slfPA_min)[1]
 
 
 
 # Visualize it
+slfPA_min$Category <- factor(slfPA_min$Category, levels = c("Jumps", "Diffusion", "Negatives")) 
+
 categ_representation <- ggplot(slfPA_min) +
-  geom_bar(aes(y = reorder(distmin,distmin,
-                     function(y)-length(y)), fill = Category_full), position = position_dodge(), show.legend = F) +
-  facet_wrap(~Category_full, scales = "free_x") +
+  geom_bar(aes(y = reorder(distmin, distmin,
+                           function(y)-length(y)), fill = Category), 
+           position = position_dodge(), show.legend = F) +
+  facet_wrap(~ Category, scales = "free_x") +
   scale_fill_brewer(palette = "Dark2") +
   ylab("Nearest transport infrastructure") +
-  # scale_y_discrete(labels = c("Major road", "Railroad", "Wood-related activities", "Farmers market", "Frequent destinations",
-                              # "Garages", "Wineries", "Moving companies", "Distribution center", "Boats", "College", 
-                              # "Port", "Airport", "Bottling plant", "Mail carrier", "Intermodal platform", "Truck stop")) +
+  xlab("Number of jumps") +
+  # scale_y_discrete(labels = c("Major road", "Railroad", "Both")) +
   theme_classic()
+
 # ggsave(file.path(here(), "figures", "vignette_highrisk", "category_representation_full_chull_all.jpg"), categ_representation,
-       width = 10, height = 3)
+       # width = 10, height = 3)
+
+
+# Calculate effect size = divide by negatives
+propPA_ES <- prop_PA %>% pivot_wider(names_from = "Category", 
+                          values_from = "n") %>% 
+  mutate(Jump_eff = Jumps/Negatives)
+
+
+ggplot(propPA_ES) +
+  geom_col(aes(x = distmin, y = Jump_eff),
+           show.legend = F) +
+  # scale_fill_brewer(palette = "Dark2") +
+  ylab("Effect size") +
+  xlab("Infrastructure type") +
+  theme_classic()
+
+```
+
+Merge full range and PA
+```{r merge and figures}
+prop_ES
+propPA_ES
+
+ES <- bind_rows(prop_ES, propPA_ES)
+
+ES_plot <- ggplot(ES) +
+  geom_col(aes(x = reorder(distmin, -Jump_eff), y = Jump_eff),
+           show.legend = F) +
+  # scale_fill_brewer(palette = "Dark2") +
+  ylab("Effect size") +
+  xlab("Infrastructure type") +
+  theme_classic()
+
+
+testNmkdir("figures/infrastructures")
+ggsave(file.path(here(), "figures", "infrastructures", 
+                 "effectsize_closestinfra.jpg"), ES_plot,
+       width = 10, height = 6)
+```
+
+
+
+
+
+
+
+
+# 1b. Same but within x meters 
+
+## Full range
+```{r choose which dataset you are testing}
+
+slf_obs <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"), h = T)
+head(slf_obs)
+
+slf_long <- slf_obs %>%
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
+
+
+slf_100m <- slf_long %>% filter(DistanceValue < 1000)
+slf_100m %>% filter(Category == "Jumps") #only 6 jumps have an infrastructure within 100 m...
+
+slf_100m$Category <- factor(slf_100m$Category, levels = c("Jumps", "Diffusion", "Negatives")) 
+
+# ggplot(slf_100m) +
+#   geom_bar(aes(y = reorder(DistanceType, DistanceType,
+#                      function(y)-length(y)), fill = Category), 
+#            position = position_dodge(), show.legend = F) +
+#   facet_wrap(~Category, scales = "free_x") +
+#   scale_fill_brewer(palette = "Dark2") +
+#   ylab("Infrastructure closer than 100 m")
+# 
+# 
+# # Calculate effect size = divide by negatives
+# prop100m <- slf_100m %>% group_by(Category, DistanceType) %>% 
+#   summarise(n = n())
+# 
+# prop100m_long <- prop100m %>%  pivot_wider(names_from = "Category", 
+#                           values_from = "n")
+# # Replace NAs by 0 if necessary
+# prop100m_long[is.na(prop100m_long)] <- 0
+# prop100m_long %<>% mutate(Jump_eff = Jumps/Negatives,
+#          Diff_eff = Diffusion/Negatives) %>% 
+#   arrange(Jump_eff)
+# 
+# 
+# ggplot(prop100m_long) +
+#   geom_col(aes(x = reorder(DistanceType, -Jump_eff), y = Jump_eff),
+#            show.legend = F) +
+#   # scale_fill_brewer(palette = "Dark2") +
+#   ylab("Effect size") +
+#   xlab("Infrastructure closer than 100 m") +
+#   theme_classic()
+```
+
+
+Are there some cases where several infrastructures are situated within 100m of the same jump?
+```{r unique closest}
+slf_100m %>% group_by(latitude_rounded, longitude_rounded) %>% count() %>% 
+  filter(n>1)
+# Yes!
+
+# Find the closest POI within 100 m
+slf_100m_min <- slf_100m %>% 
+  group_by(latitude_rounded, longitude_rounded, Category) %>% 
+  summarise(distmin = DistanceType[which.min(DistanceValue)]) 
+
+dim(slf_100m)[1] 
+dim(slf_100m_min)[1] 
+
+# Number of jumps with an infrastructure within the distance
+slf_100m_min %>% filter(Category == "Jumps")
+
+
+ggplot(slf_100m_min) +
+  geom_bar(aes(y = reorder(distmin, distmin,
+                     function(y)-length(y)), fill = Category), 
+           position = position_dodge(), show.legend = F) +
+  facet_wrap(~Category, scales = "free_x") +
+  scale_fill_brewer(palette = "Dark2") +
+  ylab("Infrastructure closer than 100 m")
+
+
+# Calculate effect size = divide by negatives
+prop100m_min <- slf_100m_min %>% group_by(Category, distmin) %>% 
+  summarise(n = n())
+
+prop100m_min_long <- prop100m_min %>%  
+  pivot_wider(names_from = "Category", values_from = "n")
+# Replace NAs by 0 if necessary
+prop100m_min_long[is.na(prop100m_min_long)] <- 0
+prop100m_min_long %<>% mutate(Jump_eff = Jumps/Negatives,
+         Diff_eff = Diffusion/Negatives) %>% 
+  arrange(Jump_eff)
+
+
+ggplot(prop100m_min_long) +
+  geom_col(aes(x = reorder(distmin, -Jump_eff), y = Jump_eff),
+           show.legend = F) +
+  # scale_fill_brewer(palette = "Dark2") +
+  ylab("Effect size") +
+  xlab("Infrastructure closer than 100 m") +
+  theme_classic()
 
 
 ```
 
-
-# 2. Categories within 100 meters (to compare with null distribution later)
+## PA
 ```{r choose which dataset you are testing}
 
-#TODO
-slf_obs_PA <- read.csv(file.path(here(), "exported-data", "obs_distances_PA.csv"), h = T)
+slf_obs_PA <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodatePA.csv"), h = T)
 head(slf_obs_PA)
+table(slf_obs_PA$Category)
 
 slfPA_long <- slf_obs_PA %>%
   pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", values_to = "DistanceValue")
 
 
-slfPA_long %>% filter(DistanceValue < 100)
+slfPA_100m <- slfPA_long %>% filter(DistanceValue < 1000)
+slfPA_100m %>% filter(Category == "Jumps") #only 7 jumps have an infrastructure within 100 m...
+
+slfPA_100m$Category <- factor(slfPA_100m$Category, levels = c("Jumps", "Diffusion", "Negatives")) 
+
+# ggplot(slfPA_100m) +
+#   geom_bar(aes(y = reorder(DistanceType, DistanceType,
+#                      function(y)-length(y)), fill = Category), position = position_dodge(), show.legend = F) +
+#   facet_wrap(~Category, scales = "free_x") +
+#   scale_fill_brewer(palette = "Dark2") +
+#   ylab("Infrastructure closer than 100 m")
+# 
+# 
+# # Calculate effect size = divide by negatives
+# propPA100m <- slfPA_100m %>% group_by(Category, DistanceType) %>% 
+#   summarise(n = n())
+# 
+# propPA100m_long <- propPA100m %>%  pivot_wider(names_from = "Category", 
+#                           values_from = "n")
+# propPA100m_long[is.na(propPA100m_long)] <- 0
+# propPA100m_long %>% mutate(Jump_eff = Jumps/Negatives,
+#          Diff_eff = Diffusion/Negatives) %>% 
+#   arrange(Jump_eff)
+
+
 ```
 
 
-# 3. Comparison of observed means between jumpers and diffusers
+Are there some cases where several infrastructures are situated within 100m of the same jump?
+```{r unique closest}
+slfPA_100m %>% group_by(latitude_rounded, longitude_rounded) %>% count() %>% 
+  filter(n>1)
+# Yes!
 
-## Calculate observed values
+# Find the closest POI within 100 m
+slfPA_100m_min <- slfPA_100m %>% 
+  group_by(latitude_rounded, longitude_rounded, Category) %>% 
+  summarise(distmin = DistanceType[which.min(DistanceValue)]) 
+
+#How many are jumps?
+slfPA_100m_min %>% filter(Category == "Jumps")
+#5!
+
+ggplot(slfPA_100m_min) +
+  geom_bar(aes(y = reorder(distmin, distmin,
+                     function(y)-length(y)), fill = Category), 
+           position = position_dodge(), show.legend = F) +
+  facet_wrap(~Category, scales = "free_x") +
+  scale_fill_brewer(palette = "Dark2") +
+  ylab("Infrastructure closer than 100 m")
+
+
+
+# Calculate effect size = divide by negatives
+propPA100m_min <- slfPA_100m_min %>% group_by(Category, distmin) %>% 
+  summarise(n = n())
+
+propPA100m_min_long <- propPA100m_min %>%  
+  pivot_wider(names_from = "Category", values_from = "n")
+# Replace NAs by 0 if necessary
+propPA100m_min_long[is.na(propPA100m_min_long)] <- 0
+propPA100m_min_long %<>% mutate(Jump_eff = Jumps/Negatives,
+         Diff_eff = Diffusion/Negatives) %>% 
+  arrange(Jump_eff)
+
+
+ggplot(propPA100m_min_long) +
+  geom_col(aes(x = reorder(distmin, -Jump_eff), y = Jump_eff),
+           show.legend = F) +
+  # scale_fill_brewer(palette = "Dark2") +
+  ylab("Effect size") +
+  xlab("Infrastructure closer than 100 m") +
+  theme_classic()
+
+```
+
+
+
+
+
+
+# 2. Comparison of observed means between jumpers, diffusers and negatives
+
+## Load data
+Load distance data + cluster numbers: full range
 ```{r distance of jumpers to transport infrastructures}
 
-slf_uptodate <- read.csv(file.path(here(), "exported-data", 
-                                   "slf_obs_uptodate.csv"))
+slf_obs <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"), h = T)
+head(slf_obs)
 
-# Summary for Category_full
-slf_uptodate %>% group_by(Category_full) %>%
-  summarise(#medianDistToRail = median(DistToRail), 
-            #medianDistToRoad = median(DistToRoad),
-            #medianDistIntRlRd = median(DistIntRlRd),
-            meanDistToRail = mean(DistToRail), 
-            meanDistToRoad = mean(DistToRoad),
-            meanDistIntRlRd = mean(DistIntRlRd))
+jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"), h = T)
+dim(jump_groups)
 
-# Summary for Category_rare
-slf_uptodate %>% group_by(Category_rare) %>%
-  summarise(#medianDistToRail = median(DistToRail),
-            #medianDistToRoad = median(DistToRoad),
-            #medianDistIntRlRd = median(DistIntRlRd),
-            meanDistToRail = mean(DistToRail), 
-            meanDistToRoad = mean(DistToRoad),
-            meanDistIntRlRd = mean(DistIntRlRd))
+slf_obs %<>% left_join(jump_groups %>% select(latitude_rounded, longitude_rounded, Group))
+slf_obs %>% filter(is.na(Group) == F) # Check they are all jumps
 
 
+dim(slf_obs %>% filter(is.na(Group)))[1] + 135 == dim(slf_obs)[1]
 
+# Need to attribute a group number to every single point
+for (i in 1:length(slf_obs$Group)){
+  if (is.na(slf_obs$Group[i])){
+    slf_obs$Group[i] = max(slf_obs$Group, na.rm = T) +1
+  }
+}
+
+head(slf_obs)
+slf_obs %>% filter(is.na(Group))
 ```
 
-```{compare jumpers from full and rarefied datasets}
+Load distance data + cluster numbers: PA
+```{r distance of jumpers to transport infrastructures}
 
-head(slf_uptodate)
-# create a dataset for jumpers in rarefied
-name <- rbind(slf_uptodate %>% filter(Category_rare == "Jumpers") %>% 
-                add_column(Dataset = "Rarefied"),
-      slf_uptodate %>% filter(Category_full == "Jumpers") %>%  
-        add_column(Dataset = "Full"))
+slf_obs_PA <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodatePA.csv"), h = T)
+head(slf_obs_PA)
 
+jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"), h = T)
+dim(jump_groups)
 
-ggplot(data = name, aes(x = Dataset, y = DistToRail)) +
-  geom_boxplot()
+slf_obs_PA %<>% left_join(jump_groups %>% select(latitude_rounded, longitude_rounded, Group))
+slf_obs_PA %>% filter(is.na(Group) == F) # Check they are all jumps
+head(slf_obs_PA)
+
+# Need to attribute a group number to every single point
+for (i in 1:length(slf_obs_PA$Group)){
+  if (is.na(slf_obs_PA$Group[i])){
+    slf_obs_PA$Group[i] = max(slf_obs_PA$Group, na.rm = T) +1
+  }
+}
+
+head(slf_obs_PA)
+slf_obs_PA %>% filter(is.na(Group))
 ```
 
 
 ## Box plot
 
-We have a first look at differences in distances to transport infrastructures between categories (Figure 1). Note that the y axis is truncated to show more clearly the boxes. Refer to the previous section to get the quartiles and maximum values of the variables. 
-Jumpers seem to be closer to rail and roads than the other two categories, but there is no visible difference regarding the distance to airports. Diffusers are intermediate between jumpers and undetected for roads and railroads. 
+We have a first look at differences in distances to transport infrastructures between categories (Figure 1). Note that the y axis is truncated to show more clearly the boxes.
 
 ```{r plot histogram of distances between jumpers, diffusers, undetected, fig.height=5, fig.width = 6, fig.cap="Distance of jumpers, diffusers and non-detections to railroads (top), roads (middle), and airports (bottom). The y axis is truncated to better show the boxes. Refer to section 1 for variables summary."}
 
-slf_uptodate <- read.csv(file.path(here(), "exported-data", 
-                                   "slf_obs_uptodate.csv"))
-head(slf_uptodate)
-
-#Modify dataset to get distribution of distances with a column for the type of distance (Road, Rail...), and one column for the type of dataset (Full or Rarefied)
-slf_uptodate_long <- slf_uptodate %>% 
-  pivot_longer(cols = starts_with("Dist"), names_to = "DistanceType", 
+#Modify dataset to get distribution of distances with a column for the type of distance (Road, Rail...)
+slf_obsPA_long <- slf_obs_PA %>% 
+  pivot_longer(cols = starts_with("DistTo"), names_to = "DistanceType", 
                values_to = "DistanceValue")
 
 # Order the variables (for plots)
-unique(slf_uptodate_long$Category_full)
-slf_uptodate_long$Category_full <- factor(slf_uptodate_long$Category_full, 
-                                          levels = c("Jumpers", "Diffusers", 
+unique(slf_obsPA_long$Category)
+slf_obsPA_long$Category <- factor(slf_obsPA_long$Category, 
+                                          levels = c("Jumps", "Diffusion", 
                                                      "Negatives"))
-
-unique(slf_uptodate_long$Category_rare)
-slf_uptodate_long$Category_rare <- factor(slf_uptodate_long$Category_rare, 
-                                          levels = c("Jumpers", "Diffusers", 
-                                                     "Negatives"))
-
-slf_uptodate_long$DistanceType <- factor(slf_uptodate_long$DistanceType, 
-                                         levels = c("DistToRoad", "DistToRail", 
-                                                    "DistIntRlRd"))
-
-slf_uptodate_long %>% group_by(Category_rare, DistanceType) %>% count()
+# Verify that it worked
+slf_obsPA_long %>% group_by(Category, DistanceType) %>% count()
 
 
 
-# Plot distances (full dataset)
-transport_bp <- ggplot(slf_uptodate_long, aes(y = DistanceValue/1000, 
-                                              x = Category_full)) + 
-  geom_boxplot(aes(fill = Category_full), 
+# Plot distances
+transport_bp <- ggplot(slf_obsPA_long, aes(y = DistanceValue/1000, 
+                                              x = Category)) + 
+  geom_boxplot(aes(fill = Category), 
                show.legend = F,
                # outlier.shape = NA
                ) +
   scale_fill_brewer(palette = "Dark2") +
-  facet_wrap(~DistanceType, scales = "free_y", ncol = 4, 
-             labeller = labeller(DistanceType = 
-    c("DistToRail" = "Railroad",
-      "DistToRoad" = "Major road",
-      "DistIntRlRd" = "Intersection of railroads and roads"))) +
+  facet_wrap(~DistanceType, scales = "free_y", ncol = 4#, 
+             # labeller = labeller(DistanceType = 
+    # c("DistToRail" = "Railroad",
+      # "DistToRoad" = "Major road",
+      # "DistIntRlRd" = "Intersection of railroads and roads"))
+    ) +
   # coord_cartesian(ylim=c(0, 16)) +
   xlab("Category") + ylab("Distance to the nearest... (km)") +
   theme_classic()
 
 transport_bp
 
-ggsave(file.path(here(), "figures", "jump_transports", 
-                 "1bis. boxplot transport_fulldata.jpg"), 
+ggsave(file.path(here(), "figures", "infrastructures", 
+                 "1. boxplot infra PA.jpg"), 
        transport_bp, width = 5, height = 3)
-
-
-# Plot distances (rarefied dataset)
-transport_bp <- ggplot(slf_uptodate_long, 
-                       aes(y = DistanceValue/1000, x = Category_rare)) + 
-  geom_boxplot(aes(fill = Category_rare), alpha = 0.5, show.legend = F) +
-  scale_fill_brewer(palette = "Dark2") +
-  facet_wrap(~DistanceType, scales = "free_y", ncol = 4,
-              labeller = labeller(DistanceType =
-    c("DistToRail" = "Railroad",
-      "DistToRoad" = "Major road",
-      "DistIntRlRd" = "Intersection of railroads and roads"))) +
-  xlab("Category") + ylab("Distance to the nearest... (km)") +
-  theme_classic()
-
-transport_bp
-
-ggsave(file.path(here(), "figures", "jump_transports", 
-                 "2bis. boxplot transport_rarefieddata.jpg"), transport_bp, 
-       width = 5, height = 3)
 
 ```
 
@@ -222,36 +516,11 @@ ggsave(file.path(here(), "figures", "jump_transports",
 
 Test of the difference of the means between jumpers, diffusers and non-detections
 
-##1. Test autocorrelation
 Because we are calculating distances between points and landscape features, we need to test if there is any autocorrelation in the dataset.
 
 ``` {r test autocorrelation}
 # Detect spatial autocorrelation in the datasets 
 
-# Start with the rarefied dataset
-Jumpers <- slf_uptodate %>% filter(Category_rare == "Jumpers")
-
-# Calculate the matrix of coordinates
-distLonLat <- as.matrix(dist(cbind(Jumpers$longitude_rounded, 
-                                   Jumpers$latitude_rounded)))
-distLonLat.inv <- 1/distLonLat
-diag(distLonLat.inv) <- 0
-
-Moran.I(Jumpers$DistToRail, distLonLat.inv)
-# $observed: # [1] 0.02370837
-# $expected: # [1] -0.02777778
-# $sd: # [1] 0.03475753
-# $p.value: # [1] 0.138528
-
-Moran.I(Jumpers$DistToRoad, distLonLat.inv)
-# $observed: [1] -0.01918829
-# $expected: [1] -0.02777778
-# $sd: [1] 0.03460668
-# $p.value: [1] 0.8039772
-
-
-
-# Continue with the full dataset
 Jumpers <- slf_uptodate %>% filter(Category_full == "Jumpers")
 
 distLonLat <- as.matrix(dist(cbind(Jumpers$longitude_rounded, 
@@ -297,53 +566,39 @@ Moran.I(Diffusers$DistToRoad, distLonLat.inv)
 
 There is major autocorrelation in the dataset! We will use a linear model to compare the categories and add a coefficient to account for autocorrelation.
 
-
-
-
-## 2. Linear model + autocorrelation coefficient 
-
-```{r load model data}
-
-slf_uptodate <- read.csv(file.path(here(), "exported-data", 
-                                   "slf_obs_uptodate.csv"))
-dim(slf_uptodate) #32911
-
-# Let's try with just jumpers and diffusers as a test
-# slf_uptodate %<>% filter(Category_full %in% c("Jumpers", "Diffusers")) 
-# dim(slf_uptodate) #5901
-```
-
 Because of large differences in sample sizes between categories, we need to resample diffusers and negatives 10,000 times with n = n(Jumpers)
 Next we calculate the autocorrelation coefficient for these datasets
 Finally we run the model
 
-### Full dataset
-Note: a version with only diffusers and jumpers was calculated and is called "full_pos"
+### Full range
+
 ```{r lm with ac, echo = FALSE}
 ModelsRail = NULL
 ModelsRoad = NULL
 ModelsInt = NULL
 
+
 # Define the datasets
-Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
-Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
-Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers")
-njumpers_full = dim(Jumpers_full)
+# Diffusers <- slf_obs %>% filter(Category == "Diffusion")
+Negatives <- slf_obs %>% filter(Category == "Negatives")
+Jumpers <- slf_obs %>% filter(Category == "Jumps")
+njumpers = dim(Jumpers)[1]
 
 
 for (i in 1:10000){
   # One iteration
   # Sample diffusers and negatives
-  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), 
-                                                 size = njumpers_full, 
-                                                 replace = FALSE),]
-  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), 
-                                                 size = njumpers_full, 
+  # Diffusers_sample <- Diffusers[sample(nrow(Diffusers), 
+                                                 # size = njumpers, 
+                                                 # replace = FALSE),]
+  Negatives_sample <- Negatives[sample(nrow(Negatives), 
+                                                 size = njumpers, 
                                                  replace = FALSE),]
 
   # Make a new dataset
-  dataset <- rbind(Jumpers_full, Diffusers_full_sample
-                   , Negatives_full_sample)
+  dataset <- rbind(Jumpers, 
+                   # Diffusers_sample, 
+                   Negatives_sample)
   
   #Make a matrix of coordinates 
   coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
@@ -351,19 +606,18 @@ for (i in 1:10000){
   
   ## 1. Model for railroad distance:
   # Calculate ac coefficients
-  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, 
+  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500,
                               type = "inverse", longlat = T)
   if (dim(dataset)[1] != length(ac_railroad)){ print("Error AC railroad")}
   dataset %<>% add_column(ac_rail = ac_railroad)
   # Run model
-  modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail, data = dataset)
+  modRail <- lm(log(DistToRail+1) ~ Category + ac_rail, data = dataset)
   # library(RVAideMemoire)
-  # plotresid(modRail_ac)
-  summary_modRailac <- summary(modRail_ac)
-  ModelsRail <- rbind(ModelsRail, 
-                      c(summary_modRailac$coefficients[c(1:4, 13:16)], #for pos only, use 1:3, 10:12 
-                      summary_modRailac$r.squared, 
-                      summary_modRailac$adj.r.squared)) 
+  summary_modRail <- summary(modRail)
+  ModelsRail <- rbind(ModelsRail,
+                      c(summary_modRail$coefficients[c(1:3, 10:12)], #for pos only, use 1:3, 10:12 
+                      summary_modRail$r.squared, 
+                      summary_modRail$adj.r.squared)) 
   #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; 
   #p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
   
@@ -376,31 +630,31 @@ for (i in 1:10000){
   if (dim(dataset)[1] != length(ac_road)){ print("Error AC road")}
   dataset %<>% add_column(ac_road = ac_road)
   # Run model
-  modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road, data = dataset)
+  modRoad <- lm(log(DistToRoad+1) ~ Category + ac_road, data = dataset)
   # plotresid(modRoad_ac)
-  summary_modRoadac <- summary(modRoad_ac)
+  summary_modRoad <- summary(modRoad)
   ModelsRoad <- rbind(ModelsRoad, 
-                      c(summary_modRoadac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modRoadac$r.squared, 
-                      summary_modRoadac$adj.r.squared)) 
+                      c(summary_modRoad$coefficients[c(1:3, 10:12)],  #for pos only, use 1:3, 10:12 
+                      summary_modRoad$r.squared, 
+                      summary_modRoad$adj.r.squared)) 
   #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
   
   
   
   ## 3. Model for intersections:
   # Calculate ac coefficients
-  ac_int <- autocov_dist(dataset$DistIntRlRd, coords, nbs = 500, 
+  ac_int <- autocov_dist(dataset$DistToRoadRail100, coords, nbs = 500, 
                          type = "inverse", longlat = T)
   if (dim(dataset)[1] != length(ac_int)){ print("Error AC int")}
   dataset %<>% add_column(ac_int = ac_int)
   # Run model
-  modInt_ac <- lm(log(DistIntRlRd+1) ~ Category_full + ac_int, data = dataset)
+  modInt <- lm(log(DistToRoadRail100 + 1) ~ Category + ac_int, data = dataset)
   # plotresid(modInt_ac)
-  summary_modIntac <- summary(modInt_ac)
+  summary_modInt <- summary(modInt)
   ModelsInt <- rbind(ModelsInt, 
-                     c(summary_modIntac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modIntac$r.squared, 
-                      summary_modIntac$adj.r.squared)) 
+                     c(summary_modInt$coefficients[c(1:3, 10:12)],  #for pos only, use 1:3, 10:12 
+                      summary_modInt$r.squared, 
+                      summary_modInt$adj.r.squared)) 
   #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
   
   
@@ -409,1429 +663,336 @@ for (i in 1:10000){
   }
 }
 
-
+testNmkdir("tables")
 ModelsRail <- data.frame(ModelsRail)
-names(ModelsRail) = c("Int_est", "DJ_est", #"DN_est", 
+names(ModelsRail) = c("Int_est", "JN_est", #"DN_est", 
                       "AC_est",
-                      "Intp", "DJp", #"DNp", 
+                      "Intp", "JNp", #"DNp", 
                       "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRail, file.path(here(), "tables", "ModelsRail_full_pos.csv"))
+write.csv(ModelsRail, file.path(here(), "tables", "ModelsRail.csv"))
 
 ModelsRoad <- data.frame(ModelsRoad)
-names(ModelsRoad) = c("Int_est", "DJ_est", #"DN_est", 
+names(ModelsRoad) = c("Int_est", "JN_est", #"DN_est", 
                       "AC_est",
-                      "Intp", "DJp", #"DNp", 
+                      "Intp", "JNp", #"DNp", 
                       "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRoad, file.path(here(), "tables", "ModelsRoad_full_pos.csv"))
+write.csv(ModelsRoad, file.path(here(), "tables", "ModelsRoad.csv"))
 
 ModelsInt <- data.frame(ModelsInt)
-names(ModelsInt) = c("Int_est", "DJ_est", #"DN_est", 
+names(ModelsInt) = c("Int_est", "JN_est", #"DN_est", 
                      "AC_est",
-                      "Intp", "DJp", #"DNp", 
+                      "Intp", "JNp", #"DNp", 
                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsInt, file.path(here(), "tables", "ModelsInt_full_pos.csv"))
+write.csv(ModelsInt, file.path(here(), "tables", "ModelsInt.csv"))
 ```
 
 
-Visualize full dataset - DistToRail data
+Visualize it - DistToRail data
 ```{r visualize full DistToRail data}
-ModelsRail <- read.csv(file.path(here(), "tables", "linear_models_transports", 
-                                 "ModelsRail_full.csv"))
+ModelsRail <- read.csv(file.path(here(), "tables",  
+                                 "ModelsRail.csv"))
 
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  # DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+ModelsRail %>% mutate(#DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  JNsignif = ifelse(DNp > 0.05, "NS", "S"),
                   ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
+  count(JNsignif)
 #DN NS = 43, S = 9957 --> difference between negatives and diffusers extremely significant
 #DJ NS = 17, S = 9983 --> difference between diffusers and jumpers extremely significant
 
-
-# Same only with positives (jumpers and diffusers)
-ModelsRail <- read.csv(file.path(here(), "tables",  "ModelsRail_full_pos.csv"))
-
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DNsignif)
-#DJ NS = 5, S = 9995 --> same as DJN
 ```
 
 
-Visualize full dataset - DistToRoad data
+Visualize it - DistToRoad data
 ```{r visualize full DistToRail data}
-ModelsRoad <- read.csv(file.path(here(), "tables", "linear_models_transports", 
-                                 "ModelsRoad_full.csv"))
+ModelsRoad <- read.csv(file.path(here(), "tables", 
+                                 "ModelsRoad.csv"))
 
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+ModelsRoad %>% mutate(#DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  JNsignif = ifelse(DNp > 0.05, "NS", "S"),
                   ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
+  count(JNsignif)
 #DN NS = 8528, S = 1472 --> difference between negatives and diffusers non-significant
 #DJ NS = 296, S = 9704 --> difference between diffusers and jumpers is significant
-
-
-# Same, only with positives
-ModelsRoad <- read.csv(file.path(here(), "tables", "ModelsRoad_full_pos.csv"))
-
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-# DJ NS = 239, S = 9761 --> same as DJN
 ```
 
 
 Visualize full dataset - DistIntRlRd data
 ```{r visualize full DistToRail data}
 
-ModelsInt <- read.csv(file.path(here(), "tables", "linear_models_transports", 
-                                "ModelsInt_full.csv"))
+ModelsInt <- read.csv(file.path(here(), "tables",  
+                                "ModelsInt.csv"))
 
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+ModelsInt %>% mutate(#DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  JNsignif = ifelse(DNp > 0.05, "NS", "S"),
                   ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
+  count(JNsignif)
 #DN, NS = 216, S = 9784 --> difference between negatives and diffusers is significant
 #DJ, NS = 9, S = 9991 --> difference between diffusers and jumpers is extremely significant
-
-
-# Positives only
-ModelsInt <- read.csv(file.path(here(), "tables", "ModelsInt_full_pos.csv"))
-
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ, NS = 3, S = 9997 --> same as DJN
 ```
 
 
 
+### PA
 
-### Rarefied dataset 
-Note: a version with only diffusers and jumpers was calculated and is called "rarefied_pos"
 ```{r lm with ac, echo = FALSE}
-
-ModelsRail = NULL
-ModelsRoad = NULL
-ModelsInt = NULL
+ModelsAirports = NULL
+ModelsPorts = NULL
+ModelsWineries = NULL
+ModelsNatProd = NULL
+ModelsPackages = NULL
+ModelsPeople = NULL
 
 # Define the datasets
-Diffusers_rare <- slf_uptodate %>% filter(Category_rare == "Diffusers")
-Negatives_rare <- slf_uptodate %>% filter(Category_rare == "Negatives")
-Jumpers_rare <- slf_uptodate %>% filter(Category_rare == "Jumpers")
-njumpers_rare = dim(Jumpers_rare)
+# Diffusers <- slf_obs %>% filter(Category == "Diffusion")
+Negatives <- slf_obs_PA %>% filter(Category == "Negatives")
+Jumpers <- slf_obs_PA %>% filter(Category == "Jumps")
+njumpers = dim(Jumpers)[1]
 
 
 for (i in 1:10000){
   # One iteration
   # Sample diffusers and negatives
-  Diffusers_rare_sample <- Diffusers_rare[sample(nrow(Diffusers_rare), 
-                                                 size = njumpers_rare, 
-                                                 replace = FALSE),]
-  Negatives_rare_sample <- Negatives_rare[sample(nrow(Negatives_rare), 
-                                                 size = njumpers_rare, 
-                                                 replace = FALSE),]
-  
-  # Make a new dataset
-  dataset <- rbind(Jumpers_rare, Diffusers_rare_sample
-  , Negatives_rare_sample)
-  
-  #Make a matrix of coordinates 
-  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
-  
-  ## 1. Model for railroad distance:
-  # Calculate ac coefficients
-  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, 
-                              type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_railroad)){ print("Error AC rail")}
-  dataset %<>% add_column(ac_rail = ac_railroad)
-  # Run model
-  modRail_ac <- lm(log(DistToRail+1) ~ Category_rare + ac_rail, data = dataset)
-  # plotresid(modRail_ac)
-  summary_modRailac <- summary(modRail_ac)
-  ModelsRail <- rbind(ModelsRail, 
-                      c(summary_modRailac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modRailac$r.squared, 
-                      summary_modRailac$adj.r.squared)) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  
-  
-  ## 2. Model for road distance:
-  # Calculate ac coefficients
-  ac_road <- autocov_dist(dataset$DistToRoad, coords, nbs = 500, 
-                          type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_road)){ print("Error AC road")}
-  dataset %<>% add_column(ac_road = ac_road)
-  # Run model
-  modRoad_ac <- lm(log(DistToRoad+1) ~ Category_rare + ac_road, data = dataset)
-  # plotresid(modRail_ac)
-  summary_modRoadac <- summary(modRoad_ac)
-  ModelsRoad <- rbind(ModelsRoad, 
-                      c(summary_modRoadac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modRoadac$r.squared, 
-                      summary_modRoadac$adj.r.squared)) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  
-  
-    ## 3. Model for interactions:
-  # Calculate ac coefficients
-  ac_int <- autocov_dist(dataset$DistIntRlRd, coords, nbs = 500, 
-                         type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_int)){ print("Error AC int")}
-  dataset %<>% add_column(ac_int = ac_int)
-  # Run model
-  modInt_ac <- lm(log(DistIntRlRd+1) ~ Category_rare + ac_int, data = dataset)
-  # plotresid(modRail_ac)
-  summary_modIntac <- summary(modInt_ac)
-  ModelsInt <- rbind(ModelsInt, 
-                     c(summary_modIntac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                       summary_modIntac$r.squared, 
-                       summary_modIntac$adj.r.squared))
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  if (i %% 100 == 0){
-    print (i)
-  }
-}
-
-
-ModelsRail <- data.frame(ModelsRail)
-names(ModelsRail) = c("Int_est", "DJ_est", "DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", "DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRail, file.path(here(), "tables", "ModelsRail_rarefied.csv"), 
-          row.names = F)
-
-
-ModelsRoad <- data.frame(ModelsRoad)
-names(ModelsRoad) = c("Int_est", "DJ_est", "DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", "DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRoad, file.path(here(), "tables", "ModelsRoad_rarefied.csv"), 
-          row.names = F)
-
-
-ModelsInt <- data.frame(ModelsInt)
-names(ModelsInt) = c("Int_est", "DJ_est", "DN_est", 
-                     "AC_est",
-                      "Intp", "DJp", "DNp", 
-                     "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsInt, file.path(here(), "tables", "ModelsInt_rarefied.csv"), 
-          row.names = F)
-```
-
-
-Visualize rarefied dataset - DistToRail data
-```{r visualize full DistToRail data}
-ModelsRail <- read.csv(file.path(here(), "tables", "linear_models_transports", "ModelsRail_rarefied.csv"))
-
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DN: NS = 4024, S = 5976 --> no
-#DJ: NS = 9895, S = 105 --> no
-
-
-# positives only
-ModelsRail <- read.csv(file.path(here(), "tables", "ModelsRail_rarefied_pos.csv"))
-
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ, NS = 9908, S = 92 --> same as DJN
-```
-
-
-Visualize rarefied dataset - DistToRoad data
-```{r visualize full DistToRail data}
-ModelsRoad <- read.csv(file.path(here(), "tables", "linear_models_transports", "ModelsRoad_rarefied.csv"))
-
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DN: NS = 8628, S = 1372 --> no
-#DJ: NS = 9940, S = 60 --> no
-
-# positives only
-ModelsRoad <- read.csv(file.path(here(), "tables", "ModelsRoad_rarefied_pos.csv"))
-
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ, NS = 9913, S = 87 --> same as DJN
-```
-
-
-Visualize rarefied dataset - DistIntRlRd data
-```{r visualize full DistToRail data}
-ModelsInt <- read.csv(file.path(here(), "tables", "linear_models_transports", 
-                                "ModelsInt_rarefied.csv"))
-
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ: NS = 9631, S = 369
-#DN: NS = 4887, S = 5113
-
-# positives only
-ModelsInt <- read.csv(file.path(here(), "tables", "ModelsInt_rarefied_pos.csv"))
-
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ, NS = 9916, S = 84 --> same as DJN
-```
-
-
-
-
-
-### Rarefied dataset but resample 1 random jump per group instead of centroid
-```{r lm with ac, echo = FALSE}
-
-#Prepare a dataset with groups to draw jumpers from
-jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
-head(jump_groups)
-jump_groups %>% 
-  group_by(bio_year) %>% count(Group) %>%
-  filter(n > 1) %>%
-  group_by(bio_year) %>% summarise(mean(n))
-  # group_by(bio_year) %>% count()
-
-ModelsRail = NULL
-ModelsRoad = NULL
-ModelsInt = NULL
-
-# Define the datasets
-Negatives_rare <- slf_uptodate %>% filter(Category_rare == "Negatives")
-Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers") %>%
-  left_join(jump_groups %>% 
-              select(-slf_present, -slf_established, -theta, -DistToSLF, 
-                     -DistToIntro, -bio_year))
-Jumpers_rare <- slf_uptodate %>% filter(Category_rare == "Jumpers")
-njumpers_rare = dim(Jumpers_rare)
-
-
-for (i in 1:10000){
-  print(i)
-  # One iteration
-    # Sample 1 jumper per group from the full dataset to create the rarefied jump dataset
-  Jumpers_rare_sample = NULL
-  for (i in 1:max(unique(Jumpers_full$Group))){
-    Group <- Jumpers_full %>% filter(Group == i)
-    Sample <- Group[sample(nrow(Group), size = 1, replace = FALSE),]
-    Jumpers_rare_sample <- rbind(Jumpers_rare_sample, Sample)
-  }
-  #Remove the group column to bind with other samples
-  #Indicate that all of them are jumps now
-  Jumpers_rare_sample %<>% select(-Group) %>% 
-    mutate(Category_rare = recode(Category_rare, "Diffusers" = "Jumpers"))
-  dim(Jumpers_rare_sample)
-  
-  # Redefine diffusers (that are not jumps)
-  new_Diffusers_rare <- slf_uptodate %>% 
-    filter(Category_rare != "Negatives") %>% # Select jumpers+diffusers
-    select(-Category_rare, -Category_full) %>% # remove previous cats
-    left_join(Jumpers_rare_sample, 
-              by = c("latitude_rounded", "longitude_rounded", "DistToRail", 
-                     "DistToRoad", "DistIntRlRd")) %>% # Join the new jumpers
-    mutate(Category_rare = ifelse(is.na(Category_rare), "Diffusers", 
-                                  "Jumpers")) %>%  # and name all other non-negatives as diffusers
-    filter(Category_rare == "Diffusers") # keep only diffusers
-
-  # Sample diffusers and negatives
-  Diffusers_rare_sample <- new_Diffusers_rare[sample(nrow(new_Diffusers_rare), 
-                                                     size = njumpers_rare, 
-                                                     replace = FALSE),]
-  Negatives_rare_sample <- Negatives_rare[sample(nrow(Negatives_rare), 
-                                                 size = njumpers_rare, 
-                                                 replace = FALSE),]
-
-
-
-  # Make a new dataset
-  dataset <- rbind(Jumpers_rare_sample, Diffusers_rare_sample, 
-                   Negatives_rare_sample)
-  # dim(dataset)
-  
-  #Make a matrix of coordinates 
-  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
-  
-  ## 1. Model for railroad distance:
-  # Calculate ac coefficients
-  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, 
-                              type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_railroad)){ print("Error AC rail")}
-  dataset %<>% add_column(ac_rail = ac_railroad)
-
-  # Run model
-  modRail_ac <- lm(log(DistToRail+1) ~ Category_rare + ac_rail, data = dataset)
-  # plotresid(modRail_ac)
-  summary_modRailac <- summary(modRail_ac)
-  ModelsRail <- rbind(ModelsRail, 
-                      c(summary_modRailac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modRailac$r.squared, 
-                      summary_modRailac$adj.r.squared)) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-
-  
-  ## 2. Model for road distance:
-  # Calculate ac coefficients
-  ac_road <- autocov_dist(dataset$DistToRoad, coords, nbs = 500, 
-                          type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_road)){ print("Error AC road")}
-  dataset %<>% add_column(ac_road = ac_road)
-  
-  # Run model
-  modRoad_ac <- lm(log(DistToRoad+1) ~ Category_rare + ac_road, data = dataset)
-  # plotresid(modRail_ac)
-  summary_modRoadac <- summary(modRoad_ac)
-  ModelsRoad <- rbind(ModelsRoad, 
-                      c(summary_modRoadac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modRoadac$r.squared, 
-                      summary_modRoadac$adj.r.squared)) #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  
-  
-    ## 3. Model for interactions:
-  # Calculate ac coefficients
-  ac_int <- autocov_dist(dataset$DistIntRlRd, coords, nbs = 500, 
-                         type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_int)){ print("Error AC int")}
-  dataset %<>% add_column(ac_int = ac_int)
-  
-  # Run model
-  modInt_ac <- lm(log(DistIntRlRd+1) ~ Category_rare + ac_int, data = dataset)
-  # plotresid(modRail_ac)
-  summary_modIntac <- summary(modInt_ac)
-  ModelsInt <- rbind(ModelsInt, 
-                     c(summary_modIntac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                       summary_modIntac$r.squared, 
-                       summary_modIntac$adj.r.squared))
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  if (i %% 100 == 0){
-    print(i)
-  }
-}
-
-
-ModelsRail <- data.frame(ModelsRail)
-names(ModelsRail) = c("Int_est", "DJ_est", "DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", "DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRail, file.path(here(), "tables", 
-                                "ModelsRail_rarefied_resampled.csv"), 
-          row.names = F)
-
-
-ModelsRoad <- data.frame(ModelsRoad)
-names(ModelsRoad) = c("Int_est", "DJ_est", "DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", "DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRoad, file.path(here(), "tables", 
-                                "ModelsRoad_rarefied_resampled.csv"), 
-          row.names = F)
-
-
-ModelsInt <- data.frame(ModelsInt)
-names(ModelsInt) = c("Int_est", "DJ_est", "DN_est", 
-                     "AC_est",
-                      "Intp", "DJp", "DNp", 
-                     "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsInt, file.path(here(), "tables", 
-                               "ModelsInt_rarefied_resampled.csv"), 
-          row.names = F)
-```
-
-
-Visualize full dataset - DistToRail data
-```{r visualize full DistToRail data}
-ModelsRail <- read.csv(file.path(here(), "tables", 
-                                 "ModelsRail_rarefied_resampled.csv"))
-
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  # DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-# DJ, S = 189, NS = 9811
-
-```
-
-
-Visualize full dataset - DistToRoad data
-```{r visualize full DistToRail data}
-ModelsRoad <- read.csv(file.path(here(), "tables",
-                                 "ModelsRoad_rarefied_resampled.csv"))
-
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-# DJ, S = 191, NS = 9809
-
-```
-
-
-Visualize full dataset - DistIntRlRd data
-```{r visualize full DistToRail data}
-
-ModelsInt <- read.csv(file.path(here(), "tables", 
-                                "ModelsInt_rarefied_resampled.csv"))
-
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-# DJ, S = 688, NS = 9312
-
-```
-
-
-
-
-
-### Full dataset but without Winchester, Harrisburg and Wilkes-Barre (biggest clusters)
-```{r full dataset without big outbreaks}
-#Prepare a dataset with groups to get groups
-jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
-head(jump_groups)
-jump_groups %>% 
-  group_by(bio_year) %>% count(Group) %>%
-  filter(n > 1) 
-# The largest clusters are groups 3, 4, and 14
-
-# Rerun the models
-ModelsRail = NULL
-ModelsRoad = NULL
-ModelsInt = NULL
-
-# Define the datasets
-Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
-Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
-Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers") %>%
-  left_join(jump_groups %>% select(-slf_present, -slf_established, -theta, 
-                                   -DistToSLF, -DistToIntro, -bio_year)) %>% 
-  filter(!Group %in% c(3,4,14)) %>% 
-  select(-Group) #remove Group column to bind it back with the other categories
-njumpers_full = dim(Jumpers_full)
-
-
-for (i in 1:10000){
-  # One iteration
-  # Sample diffusers and negatives
-  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), 
-                                                 size = njumpers_full, 
-                                                 replace = FALSE),]
-  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), 
-                                                 size = njumpers_full, 
+  # Diffusers_sample <- Diffusers[sample(nrow(Diffusers), 
+                                                 # size = njumpers, 
+                                                 # replace = FALSE),]
+  Negatives_sample <- Negatives[sample(nrow(Negatives), 
+                                                 size = njumpers, 
                                                  replace = FALSE),]
 
   # Make a new dataset
-  dataset <- rbind(Jumpers_full, Diffusers_full_sample, Negatives_full_sample)
+  dataset <- rbind(Jumpers, 
+                   # Diffusers_sample, 
+                   Negatives_sample)
   
   #Make a matrix of coordinates 
   coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
   
   
-  ## 1. Model for railroad distance:
+  ## 1. Model for airport distance:
   # Calculate ac coefficients
-  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, 
+  ac_airports <- autocov_dist(dataset$DistToAirports, coords, nbs = 500,
                               type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_railroad)){ print("Error AC railroad")}
-  dataset %<>% add_column(ac_rail = ac_railroad)
+  if (dim(dataset)[1] != length(ac_airports)){ print("Error AC railroad")}
+  dataset %<>% add_column(ac_rail = ac_airports)
   # Run model
-  modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail, data = dataset)
+  modAirports <- lm(log(DistToAirports+1) ~ Category + ac_airports, data = dataset)
   # library(RVAideMemoire)
-  # plotresid(modRail_ac)
-  summary_modRailac <- summary(modRail_ac)
-  ModelsRail <- rbind(ModelsRail, 
-                      c(summary_modRailac$coefficients[c(1:4, 13:16)], #for pos only, use 1:3, 10:12 
-                      summary_modRailac$r.squared, 
-                      summary_modRailac$adj.r.squared)) 
+  summary_modAirports <- summary(modAirports)
+  ModelsAirports <- rbind(ModelsAirports,
+                      c(summary_modAirports$coefficients[c(1:3, 10:12)], #for pos only, use 1:3, 10:12 
+                      summary_modAirports$r.squared, 
+                      summary_modAirports$adj.r.squared)) 
   #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; 
   #p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
   
   
   
-  ## 2. Model for road distance:
+  ## 2. Model for ports distance:
   # Calculate ac coefficients
-  ac_road <- autocov_dist(dataset$DistToRoad, coords, nbs = 500, 
+  ac_ports <- autocov_dist(dataset$DistToPorts, coords, nbs = 500, 
                           type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_road)){ print("Error AC road")}
-  dataset %<>% add_column(ac_road = ac_road)
+  if (dim(dataset)[1] != length(ac_ports)){ print("Error AC road")}
+  dataset %<>% add_column(ac_ports = ac_ports)
   # Run model
-  modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road, data = dataset)
+  modPorts <- lm(log(DistToPorts+1) ~ Category + ac_ports, data = dataset)
   # plotresid(modRoad_ac)
-  summary_modRoadac <- summary(modRoad_ac)
-  ModelsRoad <- rbind(ModelsRoad, 
-                      c(summary_modRoadac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modRoadac$r.squared, 
-                      summary_modRoadac$adj.r.squared)) 
+  summary_modPorts <- summary(modPorts)
+  ModelsPorts <- rbind(ModelsPorts, 
+                      c(summary_modPorts$coefficients[c(1:3, 10:12)],  #for pos only, use 1:3, 10:12 
+                      summary_modPorts$r.squared, 
+                      summary_modPorts$adj.r.squared)) 
   #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
   
   
   
-  ## 3. Model for intersections:
+  ## 3. Model for wineries:
   # Calculate ac coefficients
-  ac_int <- autocov_dist(dataset$DistIntRlRd, coords, nbs = 500, 
+  ac_wineries <- autocov_dist(dataset$DistToWineries, coords, nbs = 500, 
                          type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_int)){ print("Error AC int")}
-  dataset %<>% add_column(ac_int = ac_int)
+  if (dim(dataset)[1] != length(ac_wineries)){ print("Error AC int")}
+  dataset %<>% add_column(ac_wineries = ac_wineries)
   # Run model
-  modInt_ac <- lm(log(DistIntRlRd+1) ~ Category_full + ac_int, data = dataset)
+  modWineries <- lm(log(DistToWineries + 1) ~ Category + ac_wineries, data = dataset)
   # plotresid(modInt_ac)
-  summary_modIntac <- summary(modInt_ac)
-  ModelsInt <- rbind(ModelsInt, 
-                     c(summary_modIntac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modIntac$r.squared, 
-                      summary_modIntac$adj.r.squared)) 
+  summary_modWineries <- summary(modWineries)
+  ModelsWineries <- rbind(ModelsWineries, 
+                     c(summary_modWineries$coefficients[c(1:3, 10:12)],  #for pos only, use 1:3, 10:12 
+                      summary_modWineries$r.squared, 
+                      summary_modWineries$adj.r.squared)) 
   #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
   
+  
+    ## 4. Model for natural products:
+  # Calculate ac coefficients
+  ac_natprod <- autocov_dist(dataset$DistToNatProd, coords, nbs = 500, 
+                         type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_natprod)){ print("Error AC int")}
+  dataset %<>% add_column(ac_natprod = ac_natprod)
+  # Run model
+  modNatProd <- lm(log(DistToNatProd + 1) ~ Category + ac_natprod, data = dataset)
+  # plotresid(modInt_ac)
+  summary_modNatProd <- summary(modNatProd)
+  ModelsNatProd <- rbind(ModelsNatProd, 
+                     c(summary_modNatProd$coefficients[c(1:3, 10:12)],  #for pos only, use 1:3, 10:12 
+                      summary_modNatProd$r.squared, 
+                      summary_modNatProd$adj.r.squared)) 
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+  
+    ## 5. Model for wineries:
+  # Calculate ac coefficients
+  ac_wineries <- autocov_dist(dataset$DistToPackages, coords, nbs = 500, 
+                         type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_packages)){ print("Error AC int")}
+  dataset %<>% add_column(ac_packages = ac_packages)
+  # Run model
+  modPackages <- lm(log(DistToPackages + 1) ~ Category + ac_packages, data = dataset)
+  # plotresid(modInt_ac)
+  summary_modPackages <- summary(modPackages)
+  ModelsPackages <- rbind(ModelsPackages, 
+                     c(summary_modPackages$coefficients[c(1:3, 10:12)],  #for pos only, use 1:3, 10:12 
+                      summary_modPackages$r.squared, 
+                      summary_modPackages$adj.r.squared)) 
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+  
+  
+    ## 6. Model for wineries:
+  # Calculate ac coefficients
+  ac_people <- autocov_dist(dataset$DistToPeople, coords, nbs = 500, 
+                         type = "inverse", longlat = T)
+  if (dim(dataset)[1] != length(ac_people)){ print("Error AC int")}
+  dataset %<>% add_column(ac_people = ac_people)
+  # Run model
+  modPeople <- lm(log(DistToPeople + 1) ~ Category + ac_people, data = dataset)
+  # plotresid(modInt_ac)
+  summary_modPeople <- summary(modPeople)
+  ModelsPeople <- rbind(ModelsPeople, 
+                     c(summary_modPeople$coefficients[c(1:3, 10:12)],  #for pos only, use 1:3, 10:12 
+                      summary_modPeople$r.squared, 
+                      summary_modPeople$adj.r.squared)) 
+  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
   
   if (i %% 100 == 0){
     print (i)
   }
 }
 
-
-ModelsRail <- data.frame(ModelsRail)
-names(ModelsRail) = c("Int_est", "DJ_est", "DN_est", 
+testNmkdir("tables")
+ModelsAirports <- data.frame(ModelsAirports)
+names(ModelsAirports) = c("Int_est", "JN_est", #"DN_est", 
                       "AC_est",
-                      "Intp", "DJp", "DNp", 
+                      "Intp", "JNp", #"DNp", 
                       "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRail, file.path(here(), "tables", "ModelsRail_full_woWH.csv"))
+write.csv(ModelsAirports, file.path(here(), "tables", "ModelsAirports.csv"))
 
-ModelsRoad <- data.frame(ModelsRoad)
-names(ModelsRoad) = c("Int_est", "DJ_est", "DN_est", 
+ModelsPorts <- data.frame(ModelsPorts)
+names(ModelsPorts) = c("Int_est", "JN_est", #"DN_est", 
                       "AC_est",
-                      "Intp", "DJp", "DNp", 
+                      "Intp", "JNp", #"DNp", 
                       "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRoad, file.path(here(), "tables", "ModelsRoad_full_woWH.csv"))
+write.csv(ModelsPorts, file.path(here(), "tables", "ModelsPorts.csv"))
 
-ModelsInt <- data.frame(ModelsInt)
-names(ModelsInt) = c("Int_est", "DJ_est", "DN_est", 
+ModelsWineries <- data.frame(ModelsWineries)
+names(ModelsWineries) = c("Int_est", "JN_est", #"DN_est", 
                      "AC_est",
-                      "Intp", "DJp", "DNp", 
+                      "Intp", "JNp", #"DNp", 
                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsInt, file.path(here(), "tables", "ModelsInt_full_woWH.csv"))
+write.csv(ModelsWineries, file.path(here(), "tables", "ModelsWineries.csv"))
 
-```
-
-
-Visualize full dataset - DistToRail data
-```{r visualize full DistToRail data}
-ModelsRail <- read.csv(file.path(here(), "tables", "ModelsRail_full_woWH.csv"))
-
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ NS = 3158, S = 6842
-# DN NS = , S =
-```
-
-
-Visualize full dataset - DistToRoad data
-```{r visualize full DistToRail data}
-ModelsRoad <- read.csv(file.path(here(), "tables", "ModelsRoad_full_woWH.csv"))
-
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ NS = 6794, S = 3206 
-# DN NS = , S =
-```
-
-
-Visualize full dataset - DistIntRlRd data
-```{r visualize full DistToRail data}
-
-ModelsInt <- read.csv(file.path(here(), "tables", "ModelsInt_full_woWH.csv"))
-
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ, NS = 2399, S = 7601 
-# DN NS = , S =
-```
-
-
-
-
-### Full dataset but same number as rarefied
-```{r full dataset without big outbreaks}
-
-# Rerun the models
-ModelsRail = NULL
-ModelsRoad = NULL
-ModelsInt = NULL
-
-# Define the datasets
-Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
-Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
-Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers") 
-
-(njumpers_full = dim(slf_uptodate %>% filter(Category_rare == "Jumpers")))
-
-
-for (i in 1:10000){
-  # One iteration
-  # Sample diffusers and negatives
-  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), 
-                                                 size = njumpers_full, 
-                                                 replace = FALSE),]
-  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), 
-                                                 size = njumpers_full, 
-                                                 replace = FALSE),]
-  Jumpers_full_sample <- Jumpers_full[sample(nrow(Jumpers_full), 
-                                             size = njumpers_full, 
-                                             replace = FALSE),]
-
-  # Make a new dataset
-  dataset <- rbind(Jumpers_full_sample, Diffusers_full_sample, 
-                   Negatives_full_sample)
-  
-  #Make a matrix of coordinates 
-  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
-  
-  
-  ## 1. Model for railroad distance:
-  # Calculate ac coefficients
-  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, 
-                              type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_railroad)){ print("Error AC railroad")}
-  dataset %<>% add_column(ac_rail = ac_railroad)
-  # Run model
-  modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail, data = dataset)
-  # library(RVAideMemoire)
-  # plotresid(modRail_ac)
-  summary_modRailac <- summary(modRail_ac)
-  ModelsRail <- rbind(ModelsRail, 
-                      c(summary_modRailac$coefficients[c(1:4, 13:16)], #for pos only, use 1:3, 10:12 
-                      summary_modRailac$r.squared, 
-                      summary_modRailac$adj.r.squared)) 
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; 
-  #p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  
-  
-  ## 2. Model for road distance:
-  # Calculate ac coefficients
-  ac_road <- autocov_dist(dataset$DistToRoad, coords, nbs = 500, 
-                          type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_road)){ print("Error AC road")}
-  dataset %<>% add_column(ac_road = ac_road)
-  # Run model
-  modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road, data = dataset)
-  # plotresid(modRoad_ac)
-  summary_modRoadac <- summary(modRoad_ac)
-  ModelsRoad <- rbind(ModelsRoad, 
-                      c(summary_modRoadac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modRoadac$r.squared, 
-                      summary_modRoadac$adj.r.squared)) 
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  
-  
-  ## 3. Model for intersections:
-  # Calculate ac coefficients
-  ac_int <- autocov_dist(dataset$DistIntRlRd, coords, nbs = 500, 
-                         type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_int)){ print("Error AC int")}
-  dataset %<>% add_column(ac_int = ac_int)
-  # Run model
-  modInt_ac <- lm(log(DistIntRlRd+1) ~ Category_full + ac_int, data = dataset)
-  # plotresid(modInt_ac)
-  summary_modIntac <- summary(modInt_ac)
-  ModelsInt <- rbind(ModelsInt, 
-                     c(summary_modIntac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modIntac$r.squared, 
-                      summary_modIntac$adj.r.squared)) 
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  
-  if (i %% 100 == 0){
-    print (i)
-  }
-}
-
-
-ModelsRail <- data.frame(ModelsRail)
-names(ModelsRail) = c("Int_est", "DJ_est", "DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", "DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRail, file.path(here(), "tables", 
-                                "ModelsRail_full_sizerare.csv"))
-
-ModelsRoad <- data.frame(ModelsRoad)
-names(ModelsRoad) = c("Int_est", "DJ_est", "DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", "DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRoad, file.path(here(), "tables", 
-                                "ModelsRoad_full_sizerare.csv"))
-
-ModelsInt <- data.frame(ModelsInt)
-names(ModelsInt) = c("Int_est", "DJ_est", "DN_est", 
+ModelsNatProd <- data.frame(ModelsNatProd)
+names(ModelsNatProd) = c("Int_est", "JN_est", #"DN_est", 
                      "AC_est",
-                      "Intp", "DJp", "DNp", 
+                      "Intp", "JNp", #"DNp", 
                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsInt, file.path(here(), "tables", 
-                               "ModelsInt_full_sizerare.csv"))
+write.csv(ModelsNatProd, file.path(here(), "tables", "ModelsNatProd.csv"))
 
-```
-
-
-Visualize full dataset - DistToRail data
-```{r visualize full DistToRail data}
-ModelsRail <- read.csv(file.path(here(), "tables", 
-                                 "ModelsRail_full_sizerare.csv"))
-
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ NS = 3064
-```
-
-
-Visualize full dataset - DistToRoad data
-```{r visualize full DistToRail data}
-ModelsRoad <- read.csv(file.path(here(), "tables", 
-                                 "ModelsRoad_full_sizerare.csv"))
-
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ NS = 5692
-```
-
-
-Visualize full dataset - DistIntRlRd data
-```{r visualize full DistToRail data}
-
-ModelsInt <- read.csv(file.path(here(), "tables", 
-                                "ModelsInt_full_sizerare.csv"))
-
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ, NS = 2619
-```
-
-
-
-### Full dataset but without Winchester, Harrisburg and Wilkes-Barre AND same number as rarefied
-```{r full dataset without big outbreaks}
-#Prepare a dataset with groups to get groups
-jump_groups <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
-head(jump_groups)
-jump_groups %>% 
-  group_by(bio_year) %>% count(Group) %>%
-  filter(n > 1) 
-# The largest clusters are groups 3, 4, and 14
-
-# Rerun the models
-ModelsRail = NULL
-ModelsRoad = NULL
-ModelsInt = NULL
-
-# Define the datasets
-Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
-Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
-Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers") %>%
-  left_join(jump_groups %>% select(-slf_present, -slf_established, -theta, 
-                                   -DistToSLF, -DistToIntro, -bio_year)) %>% 
-  filter(!Group %in% c(3,4,14)) %>% 
-  select(-Group) #remove Group column to bind it back with the other categories
-(njumpers_full = dim(slf_uptodate %>% filter(Category_rare == "Jumpers")))
-
-
-for (i in 1:10000){
-  # One iteration
-  # Sample diffusers and negatives
-  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), 
-                                                 size = njumpers_full, 
-                                                 replace = FALSE),]
-  Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), 
-                                                 size = njumpers_full, 
-                                                 replace = FALSE),]
-  Jumpers_full_sample <- Jumpers_full[sample(nrow(Jumpers_full), 
-                                             size = njumpers_full, 
-                                             replace = FALSE),]
-
-  # Make a new dataset
-  dataset <- rbind(Jumpers_full_sample, Diffusers_full_sample, 
-                   Negatives_full_sample)
-  
-  #Make a matrix of coordinates 
-  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
-  
-  
-  ## 1. Model for railroad distance:
-  # Calculate ac coefficients
-  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, 
-                              type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_railroad)){ print("Error AC railroad")}
-  dataset %<>% add_column(ac_rail = ac_railroad)
-  # Run model
-  modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail, data = dataset)
-  # library(RVAideMemoire)
-  # plotresid(modRail_ac)
-  summary_modRailac <- summary(modRail_ac)
-  ModelsRail <- rbind(ModelsRail, 
-                      c(summary_modRailac$coefficients[c(1:4, 13:16)], #for pos only, use 1:3, 10:12 
-                      summary_modRailac$r.squared, 
-                      summary_modRailac$adj.r.squared)) 
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; 
-  #p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  
-  
-  ## 2. Model for road distance:
-  # Calculate ac coefficients
-  ac_road <- autocov_dist(dataset$DistToRoad, coords, nbs = 500, 
-                          type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_road)){ print("Error AC road")}
-  dataset %<>% add_column(ac_road = ac_road)
-  # Run model
-  modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road, data = dataset)
-  # plotresid(modRoad_ac)
-  summary_modRoadac <- summary(modRoad_ac)
-  ModelsRoad <- rbind(ModelsRoad, 
-                      c(summary_modRoadac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modRoadac$r.squared, 
-                      summary_modRoadac$adj.r.squared)) 
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  
-  
-  ## 3. Model for intersections:
-  # Calculate ac coefficients
-  ac_int <- autocov_dist(dataset$DistIntRlRd, coords, nbs = 500, 
-                         type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_int)){ print("Error AC int")}
-  dataset %<>% add_column(ac_int = ac_int)
-  # Run model
-  modInt_ac <- lm(log(DistIntRlRd+1) ~ Category_full + ac_int, data = dataset)
-  # plotresid(modInt_ac)
-  summary_modIntac <- summary(modInt_ac)
-  ModelsInt <- rbind(ModelsInt, 
-                     c(summary_modIntac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modIntac$r.squared, 
-                      summary_modIntac$adj.r.squared)) 
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
-  
-  
-  if (i %% 100 == 0){
-    print (i)
-  }
-}
-
-
-ModelsRail <- data.frame(ModelsRail)
-names(ModelsRail) = c("Int_est", "DJ_est", "DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", "DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRail, file.path(here(), "tables", 
-                                "ModelsRail_full_woWH_sizerare.csv"))
-
-ModelsRoad <- data.frame(ModelsRoad)
-names(ModelsRoad) = c("Int_est", "DJ_est", "DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", "DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRoad, file.path(here(), "tables", 
-                                "ModelsRoad_full_woWH_sizerare.csv"))
-
-ModelsInt <- data.frame(ModelsInt)
-names(ModelsInt) = c("Int_est", "DJ_est", "DN_est", 
+ModelsPackages <- data.frame(ModelsPackages)
+names(ModelsPackages) = c("Int_est", "JN_est", #"DN_est", 
                      "AC_est",
-                      "Intp", "DJp", "DNp", 
+                      "Intp", "JNp", #"DNp", 
                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsInt, file.path(here(), "tables", 
-                               "ModelsInt_full_woWH_sizerare.csv"))
+write.csv(ModelsPackages, file.path(here(), "tables", "ModelsPackages.csv"))
 
+ModelsPeople <- data.frame(ModelsPeople)
+names(ModelsPeople) = c("Int_est", "JN_est", #"DN_est", 
+                     "AC_est",
+                      "Intp", "JNp", #"DNp", 
+                     "ACp", "Rsquared", "Adj Rsquared")
+write.csv(ModelsPeople, file.path(here(), "tables", "ModelsPeople.csv"))
 ```
 
 
-Visualize full dataset - DistToRail data
-```{r visualize full DistToRail data}
-ModelsRail <- read.csv(file.path(here(), "tables", 
-                                 "ModelsRail_full_woWH_sizerare.csv"))
 
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+
+Visualize it - DistToAirports data
+```{r visualize full DistToAirports data}
+ModelsAirports <- read.csv(file.path(here(), "tables",  
+                                 "ModelsRail.csv"))
+
+ModelsAirports %>% mutate(#DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  JNsignif = ifelse(DNp > 0.05, "NS", "S"),
                   ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ NS = 8233
+  count(JNsignif)
+
 ```
 
+Visualize it - DistToPorts data
+```{r visualize full DistToPorts data}
+ModelsPorts <- read.csv(file.path(here(), "tables",  
+                                 "ModelsRail.csv"))
 
-Visualize full dataset - DistToRoad data
-```{r visualize full DistToRail data}
-ModelsRoad <- read.csv(file.path(here(), "tables", 
-                                 "ModelsRoad_full_woWH_sizerare.csv"))
-
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+ModelsPorts %>% mutate(#DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  JNsignif = ifelse(DNp > 0.05, "NS", "S"),
                   ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ NS = 9010
+  count(JNsignif)
+
 ```
 
+Visualize it - DistToWineries data
+```{r visualize full DistToWineries data}
+ModelsWineries <- read.csv(file.path(here(), "tables",  
+                                 "ModelsRail.csv"))
 
-Visualize full dataset - DistIntRlRd data
-```{r visualize full DistToRail data}
-
-ModelsInt <- read.csv(file.path(here(), "tables", 
-                                "ModelsInt_full_woWH_sizerare.csv"))
-
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
+ModelsWineries %>% mutate(#DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  JNsignif = ifelse(DNp > 0.05, "NS", "S"),
                   ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ, NS = 7414
-```
-
-
-
-
-# 6. Check for differences between outbreaks and non-outbreaks
-
-1. Create variable outbreaks vs non-outbreaks
-```{r load data for oubreaks vs non outbreaks}
-slf_uptodate <- read.csv(file.path(here(), "exported-data", 
-                                   "slf_obs_uptodate.csv"))
-
-jump_groups <- read.csv(file.path(here(), "exported-data", 
-                                  "jump_groups.csv"))
-
-DistToThreshold <- read.csv(file.path(here(), "exported-data", 
-                                      "DistToThreshold.csv")) 
-dim(DistToThreshold)
-
-# Join all jumpers, their distances and their groups
-outbreaks <- slf_uptodate %>% 
-  filter(Category_full == "Jumpers") %>% 
-  left_join(jump_groups %>% select(-slf_present, -slf_established, 
-                                   -theta, -DistToSLF))
-
-# Define which groups are outbreaks: identify groups with duplicates and attribute them a TRUE value.
-outbreaks %<>% mutate(Outbreaks = ifelse(outbreaks$Group %in% unique(outbreaks[duplicated(outbreaks$Group),10]), TRUE, FALSE))
-
-
-# Merge DistToThreshold
-outbreaks %<>% left_join(DistToThreshold %>% select(-X, -slf_present, 
-                                                    -slf_established, -theta, 
-                                                    -DistToSLF, -DistToIntro, 
-                                                    -Rarefied, -sectors, 
-                                                    -longitude_threshold, 
-                                                    -latitude_threshold))
-
-
-head(outbreaks)
-dim(outbreaks) 
-
-non_outbreaks <- outbreaks %>% filter(Outbreaks == F) %>% 
-  add_column(Dataset = "Non-outbreaks")
-# non_outbreaks is the dataset for non-outbreak points
-outbreaks_all <- outbreaks %>% filter(Outbreaks == T) %>% 
-  add_column(Dataset = "Outbreaks, all points")
-# outbreaks_all is all the points from outbreaks
-rarefied_dataset <- outbreaks %>% filter(Category_rare == "Jumpers") %>% 
-  add_column(Dataset = "Rarefied dataset")
-# rarefied_dataset is only the rarefied dataset
-outbreaks_centroid <- outbreaks %>% 
-  filter(Outbreaks == T, Category_rare == "Jumpers") %>% 
-  add_column(Dataset = "Centroid of outbreaks")
-# outbreaks_centroid is all the points from outbreaks
-outbreaks %<>% add_column(Dataset = "All points")
-#outbreaks is the dataset for all points
-
-test_outbreaks <- rbind(non_outbreaks, outbreaks_all, 
-                        outbreaks_centroid, outbreaks)
-test_outbreaks <- rbind(non_outbreaks, outbreaks_centroid)
-#bind all rows
-head(test_outbreaks)
-test_outbreaks %<>% select(-DistToIntro)
+  count(JNsignif)
 
 ```
 
-2. Boxplot
-```{r boxplot outbreaks vs non outbreaks}
+Visualize it - DistToNatProd data
+```{r visualize full DistToNatProd data}
+ModelsNatProd <- read.csv(file.path(here(), "tables",  
+                                 "ModelsRail.csv"))
 
-# pivot dataset for facet_wrap
-outbreaks_long <- test_outbreaks %>% 
-  pivot_longer(cols = starts_with("Dist"), names_to = "DistanceType", 
-               values_to = "DistanceValue")
-head(outbreaks_long)
+ModelsNatProd %>% mutate(#DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  JNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(JNsignif)
 
-# Order the variables (for plots)
-unique(outbreaks_long$DistanceType)
-outbreaks_long$DistanceType <- factor(outbreaks_long$DistanceType, 
-                                      levels = c("DistToThreshold", "DistToRail", 
-                                                 "DistToRoad", "DistIntRlRd"))
-outbreaks_long$Dataset <- factor(outbreaks_long$Dataset, 
-                                 levels = c("All points", "Non-outbreaks", 
-                                            "Outbreaks, all points", 
-                                            "Centroid of outbreaks"))
-
-# Boxplot
-outbreaks_plot <- ggplot(outbreaks_long, aes(y = DistanceValue/1000, 
-                                             x = Dataset)) + 
-  geom_boxplot() +
-  facet_wrap(~DistanceType, scales = "free_y", ncol = 4,
-             labeller = labeller(DistanceType = 
-    c("DistToThreshold" = "Invasion front", 
-      "DistToRail" = "Railroad",
-      "DistToRoad" = "Major road",
-      "DistIntRlRd" = "Both"))) +
-  ylab("Distance to... (km)") +
-  theme_classic() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, 
-                                                     hjust=1))
-
-outbreaks_plot
-
-ggsave(file.path(here(), "figures", "jump_transports", "5. boxplot outbreaks.jpg"), 
-       outbreaks_plot, width = 10, height = 5)
 ```
 
+Visualize it - DistToPackages data
+```{r visualize full DistToPackages data}
+ModelsPackages <- read.csv(file.path(here(), "tables",  
+                                 "ModelsRail.csv"))
 
-3. Statistical tests
+ModelsPackages %>% mutate(#DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  JNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(JNsignif)
 
-Is the centroid representative of all points of the group?
-```{r boxplot points per group vs their centroid}
-# pivot dataset for facet_wrap
-outbreaks_long <- test_outbreaks %>% 
-  pivot_longer(cols = starts_with("Dist"), names_to = "DistanceType", 
-               values_to = "DistanceValue")
-head(outbreaks_long)
-
-represent <- outbreaks_long %>% filter(Dataset %in% c("Centroid of outbreaks",
-                                         "Outbreaks, all points"))
-
-# Boxplot
-represent_plot <- ggplot() + 
-  geom_boxplot(data = represent %>% filter(Dataset == "Outbreaks, all points"), 
-               aes(y = DistanceValue/1000, x = as.factor(Group), 
-                   col = as.factor(Group)), show.legend = F) +
-  geom_point(data = represent %>% filter(Dataset == "Centroid of outbreaks"), 
-             aes(y = DistanceValue/1000, x = as.factor(Group))) +
-  facet_wrap(~DistanceType, scales = "free_y", ncol = 2,
-             labeller = labeller(DistanceType = 
-    c("DistToThreshold" = "Invasion front", 
-      "DistToRail" = "Railroad",
-      "DistToRoad" = "Major road",
-      "DistIntRlRd" = "Both"))) +
-  ylab("Distance to... (km)") +
-  theme_classic() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, 
-                                                     hjust=1))
-
-represent_plot
-
-ggsave(file.path(here(), "figures", "jump_transports", 
-                 "6. boxplot per outbreak.jpg"), represent_plot, 
-       width = 5, height = 5)
 ```
 
-Statistical test (should be paired somehow + transformed into permutation test)
-```{r statistical test all outbreaks vs their centroid}
+Visualize it - DistToPeople data
+```{r visualize full DistToPeople data}
+ModelsPeople <- read.csv(file.path(here(), "tables",  
+                                 "ModelsRail.csv"))
 
-# DistToThreshold
-bartlett.test(DistToThreshold ~ Dataset,  data = test_outbreaks %>% 
-                filter(Dataset %in% c("Outbreaks, all points", 
-                                      "Centroid of outbreaks")))
-# p = 0.55, no diff in variance
-t.test(DistToThreshold ~ Dataset, data = test_outbreaks %>% 
-         filter(Dataset %in% c("Outbreaks, all points", 
-                               "Centroid of outbreaks")))
-# p = 0.73, no diff
+ModelsPeople %>% mutate(#DJsignif = ifelse(DJp > 0.05, "NS", "S"),
+                  JNsignif = ifelse(DNp > 0.05, "NS", "S"),
+                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
+  count(JNsignif)
 
-
-# DistToRail
-bartlett.test(DistToRail ~ Dataset,  data = test_outbreaks %>% 
-                filter(Dataset %in% c("Outbreaks, all points", 
-                                      "Centroid of outbreaks")))
-# p = 0.044, diff in variance!
-t.test(DistToRail ~ Dataset, data = test_outbreaks %>% 
-         filter(Dataset %in% c("Outbreaks, all points", 
-                               "Centroid of outbreaks")))
-# p = 0.99, no diff
-
-
-# DistToRoad
-bartlett.test(DistToRoad ~ Dataset,  data = test_outbreaks %>% 
-                filter(Dataset %in% c("Outbreaks, all points", 
-                                      "Centroid of outbreaks")))
-# p = 10, no diff in variance
-t.test(DistToRoad ~ Dataset, data = test_outbreaks %>% 
-         filter(Dataset %in% c("Outbreaks, all points", 
-                               "Centroid of outbreaks")))
-# p = 0.487, no diff
-
-
-# DistToIntRlRd
-bartlett.test(DistIntRlRd ~ Dataset,  data = test_outbreaks %>% 
-                filter(Dataset %in% c("Outbreaks, all points", 
-                                      "Centroid of outbreaks")))
-# p = 0.044, diff in variance!
-t.test(DistIntRlRd ~ Dataset, data = test_outbreaks %>% 
-         filter(Dataset %in% c("Outbreaks, all points", 
-                               "Centroid of outbreaks")))
-# p = 0.87, no diff
-```
-
-No diff, so yes the centroid is a good representation of the group
-
-
-
-Is there a difference between non-outbreaks and the centroid of outbreaks?
-Use permutation tests because sample size is small and distributions are not normal
-```{r statistical test all outbreaks vs non-outbreaks}
-
-(obs_rail <- mean(non_outbreaks$DistToRail) - mean(outbreaks_centroid$DistToRail))
-(obs_road <- mean(non_outbreaks$DistToRoad) - mean(outbreaks_centroid$DistToRoad))
-(obs_int <- mean(non_outbreaks$DistIntRlRd) - mean(outbreaks_centroid$DistIntRlRd))
-#H0 = non_outbreaks$DistToRail = outbreaks_centroid$DistToRail
-#Ha = non_outbreaks$DistToRail - outbreaks_centroid$DistToRail > 0
-# This is what we are going to test!
-
-# set the number of permutations 
-sim <- 10^4 #number of permutations
-
-#create an empty vector to store the simulated averages
-permRail <- rep(NA, sim)
-permRoad <- rep(NA, sim) 
-permIntRlRd <- rep(NA, sim) 
-
-# Pool the data
-test_outbreaks <- rbind(non_outbreaks, outbreaks_centroid)
-boxplot(test_outbreaks$DistToRail ~ test_outbreaks$Dataset)
-
-set.seed(2022) # make sure the results are going to be the same every time we run the code
-(k <- nrow(non_outbreaks)) # number of individuals to sample/permute from group 1
-
-
-# Iterate 10,000 times
-for (i in 1:sim) { 
-  # Randomly split the data into 2 groups
-  # one group has the same number of items that outbreaks_centroid
-  # one group has the same number of items that non_outbreaks
-   these <- sample(1:nrow(test_outbreaks), size = k)
-   non_outbreaks_sim <- test_outbreaks[these,]  
-   outbreaks_centroid_sim <- test_outbreaks[-these,]
-  
-  # calculate the mean for each group and find the difference
-  # store this difference in means in a vector (that's the null distribution)
-  permRail[i] = mean(non_outbreaks_sim$DistToRail) - 
-    mean(outbreaks_centroid_sim$DistToRail)
-  permRoad[i] = mean(non_outbreaks_sim$DistToRoad) - 
-    mean(outbreaks_centroid_sim$DistToRoad)
-  permIntRlRd[i] = mean(non_outbreaks_sim$DistIntRlRd) - 
-    mean(outbreaks_centroid_sim$DistIntRlRd)
-} 
-
-#add the observed difference as the final item in the vector
-permRail[10000] = obs_rail
-permRoad[10000] = obs_road
-permIntRlRd[10000] = obs_int
-
-# compare observed vs permuted
-# count how many simulations are larger than the observed statistic
-# one or two alternatives (abs or not abs values)
-tablepropRail = table(permRail >= obs_rail)
-pRail = tablepropRail[2]/10000
-pRail #p = 0.1709
-hist(permRail)
-abline(v = permRail[10000], col = "red")
-
-tablepropRoad = table(permRoad >= obs_road)
-pRoad = tablepropRoad[2]/10000
-pRoad #p = 0.3487
-hist(permRoad)
-abline(v = permRoad[10000], col = "red")
-
-tablepropInt = table(permIntRlRd >= obs_int)
-pInt = tablepropInt[2]/10000
-pInt #p = 0.2079
-hist(permIntRlRd)
-abline(v = permIntRlRd[10000], col = "red")
-```
-
-Classic tests
-```{r test diff stat}
-# DistToThreshold
-bartlett.test(DistToThreshold ~ Dataset,  data = test_outbreaks %>% 
-                filter(Dataset %in% c("Centroid of outbreaks", "Non-outbreaks")))
-# p = 0.53, no diff in variance
-t.test(DistToThreshold ~ Dataset, data = test_outbreaks %>% 
-         filter(Dataset %in% c("Centroid of outbreaks", "Non-outbreaks")))
-# p = 0.90, no diff
-
-
-# DistToRail
-bartlett.test(DistToRail ~ Dataset,  data = test_outbreaks %>% 
-                filter(Dataset %in% c("Centroid of outbreaks", "Non-outbreaks")))
-# p = 0.059, no diff in variance
-t.test(DistToRail ~ Dataset, data = test_outbreaks %>% 
-         filter(Dataset %in% c("Centroid of outbreaks", "Non-outbreaks")))
-# p = 0.27, no diff
-
-
-# DistToRoad
-bartlett.test(DistToRoad ~ Dataset,  data = test_outbreaks %>% 
-                filter(Dataset %in% c("Centroid of outbreaks", "Non-outbreaks")))
-# p = 0.54, no diff in variance
-t.test(DistToRoad ~ Dataset, data = test_outbreaks %>% 
-         filter(Dataset %in% c("Centroid of outbreaks", "Non-outbreaks")))
-# p = 0.65, no diff
-
-
-# DistToIntRlRd
-bartlett.test(DistIntRlRd ~ Dataset,  data = test_outbreaks %>% 
-                filter(Dataset %in% c("Centroid of outbreaks", "Non-outbreaks")))
-# p = 0.04, no diff in variance
-t.test(DistIntRlRd ~ Dataset, data = test_outbreaks %>% 
-         filter(Dataset %in% c("Centroid of outbreaks", "Non-outbreaks")))
-# p = 0.33, no diff
-```
-
-
-No difference between non-outbreaks and the centroid of outbreaks
-Even though the centroid is representative of outbreaks
-Even though there is a huge difference between full and rarefied dataset
-However this difference disappears if we remove the biggest clusters from the full dataset
-Could these big clusters be responsible for this tendency?
-
-Let's test the difference between all points and these clusters (and/or their centroid).
-```{r statistical test all outbreaks vs non-outbreaks}
-
-outbreaks <- slf_uptodate %>% 
-  filter(Category_full == "Jumpers") %>% 
-  left_join(jump_groups %>% select(-slf_present, -slf_established, 
-                                   -theta, -DistToSLF))
-
-# Define which groups are outbreaks: identify groups with duplicates and attribute them a TRUE value.
-outbreaks %<>% mutate(Outbreaks = ifelse(outbreaks$Group %in% unique(outbreaks[duplicated(outbreaks$Group),10]), TRUE, FALSE))
-
-hist(table(outbreaks$Group), breaks = 30)
-# Largest group = group 4 (30 points), group 3 (19 points), group 14 (18 points)
-
-# Centroid of big clusters
-centroids_bigoutbreaks <- outbreaks %>% 
-  filter(#Outbreaks == T, 
-         Category_rare == "Jumpers"
-                                               ) %>% 
-  # filter(Group %in% c(3,4,14)) %>% 
-  filter(Group %in% c(34,36,13)) %>% 
-  add_column(Dataset = "Big clusters")
-  
-all_centroids <- outbreaks %>% 
-  filter(Category_rare == "Jumpers") %>%
-  # filter(!Group %in% c(3,4,14)) %>% 
-  filter(!Group %in% c(34,36,13)) %>% 
-  add_column(Dataset = "All points except big clusters")
-
-
-
-
-
-(obs_rail <- mean(all_centroids$DistToRail) - 
-    mean(centroids_bigoutbreaks$DistToRail))
-(obs_road <- mean(all_centroids$DistToRoad) - 
-    mean(centroids_bigoutbreaks$DistToRoad))
-(obs_int <- mean(all_centroids$DistIntRlRd) - 
-    mean(centroids_bigoutbreaks$DistIntRlRd))
-
-# set the number of permutations 
-sim <- 10^4 #number of permutations
-
-#create an empty vector to store the simulated averages
-permRail <- rep(NA, sim)
-permRoad <- rep(NA, sim) 
-permIntRlRd <- rep(NA, sim) 
-
-# Pool the data
-test_outbreaks <- rbind(centroids_bigoutbreaks, all_centroids)
-boxplot(test_outbreaks$DistToRail~test_outbreaks$Dataset)
-
-set.seed(2022) # make sure the results are going to be the same every time we run the code
-(k <- nrow(all_centroids)) # number of individuals to sample/permute from group 1
-
-
-# Iterate 10,000 times
-for (i in 1:sim) { 
-  # Randomly split the data into 2 groups
-  # one group has the same number of items that outbreaks_centroid
-  # one group has the same number of items that non_outbreaks
-   these <- sample(1:nrow(test_outbreaks), size = k)
-   allcentroids_sim <- test_outbreaks[these,]  
-   bigoutbreaks_centroid_sim <- test_outbreaks[-these,]
-  
-  # calculate the mean for each group and find the difference
-  # store this difference in means in a vector (that's the null distribution)
-  permRail[i] = mean(allcentroids_sim$DistToRail) - 
-    mean(bigoutbreaks_centroid_sim$DistToRail)
-  permRoad[i] = mean(allcentroids_sim$DistToRoad) - 
-    mean(bigoutbreaks_centroid_sim$DistToRoad)
-  permIntRlRd[i] = mean(allcentroids_sim$DistIntRlRd) - 
-    mean(bigoutbreaks_centroid_sim$DistIntRlRd)
-} 
-
-#add the observed difference as the final item in the vector
-permRail[10000] = obs_rail
-permRoad[10000] = obs_road
-permIntRlRd[10000] = obs_int
-
-# compare observed vs permuted
-# count how many simulations are larger than the observed statistic
-# one or two alternatives (abs or not abs values)
-tablepropRail = table(abs(permRail) >= abs(obs_rail))
-pRail = tablepropRail[2]/10000
-pRail #p = 0.1816
-hist(permRail)
-abline(v = permRail[10000], col = "red")
-
-tablepropRoad = table(permRoad >= obs_road)
-pRoad = tablepropRoad[2]/10000
-pRoad #p = 0.3487
-hist(permRoad)
-abline(v = permRoad[10000], col = "red")
-
-tablepropInt = table(permIntRlRd >= obs_int)
-pInt = tablepropInt[2]/10000
-pInt #p = 0.2079
-hist(permIntRlRd)
-abline(v = permIntRlRd[10000], col = "red")
-```
-
-The distances are much higher for the big clusters when considering all points,
-but not when considering only their centroids.
-So I am wondering: could it be, instead, that some of the jumps without clusters are farther than all the others?
-No! (replaced in previous chunk)
-
-
-
-Now can we check if the number of points of location is linked to these distances!
-```{r lm nb points vs distance}
-nb_points_group <- outbreaks %>% count(Group)
-
-rarefied_dataset <- outbreaks %>% filter(Category_rare == "Jumpers") %>% 
-  add_column(Dataset = "Rarefied dataset")
-rarefied_dataset %<>% left_join(nb_points_group) 
-
-model <- lm(n ~ DistToRail, data = rarefied_dataset)
-summary(model)
 ```
