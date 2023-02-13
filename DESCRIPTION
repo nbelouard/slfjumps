@@ -28,6 +28,7 @@ Imports:
   ape,
   spdep,
   purrr,
-  leaflet
+  leaflet,
+  lwgeom
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.2.1

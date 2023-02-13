@@ -55,6 +55,7 @@ library(here)
 library(ape)
 library(spdep)
 library(leaflet)
+library(slfjumps)
 
 sf::sf_use_s2(FALSE)
 ```
