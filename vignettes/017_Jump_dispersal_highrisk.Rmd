@@ -638,6 +638,8 @@ write.csv(slfPA_uptodate, file.path(here(), "exported-data", "slfPA_uptodate.csv
 
 Calculate statistics
 ```{r calculate proportions of data}
+slfPA_uptodate <- read.csv(file.path(here(), "exported-data", "slfPA_uptodate.csv"))
+head(slfPA_uptodate)
 positive <- slfPA_uptodate %>% filter(Category_full %in% c("Diffusers", "Jumpers")) 
 dim(positive)[1]/dim(slfPA_uptodate)[1] #18.91%
 ```
@@ -904,7 +906,7 @@ head(Simulated_highrisk)
 head(Simulated_transports)
 # Coordinates don't match but here all we care about is distances!
 Coordinates_simulated <- cbind(Simulated_highrisk %>% select(-latitude_rounded, -longitude_rounded), 
-                               Simulated_transports%>% select(-latitude_rounded, -longitude_rounded))
+                               Simulated_transports %>% select(-latitude_rounded, -longitude_rounded))
 head(Coordinates_simulated)
 
 # Size of the dataset to be sampled

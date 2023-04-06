@@ -125,13 +125,21 @@ We reshape the table to summarize the information by rounding the geographical c
 
 Note: when several surveys indicate that SLF are "present" the same year at the same location, we could be tempted to categorize them in the "established" category. However, the category "present" often refers to dead individuals, although this information is not explicitly available. We use a conservative approach and kept the same categories while summarizing the data.
 
+/!\ UPDATE: It may not be wise to round coordinates, because then distances to infrastructures are going to be biased. Let's see the number of jumps obtained if we don't round coordinates.
+
 ```{r rounding coordinates, echo = params$display, warnings = FALSE, message = FALSE, eval = params$run}
+
+slf_tiny <- read.csv(file.path(here(), "exported-data", "slftiny.csv"), header = T)
+head(slf_tiny)
+
 # specifying the width of the mesh, in km
-size_of_grid <- 1
+size_of_grid <- 0.01
 
 # rounding coordinates and summarizing surveys by location and year
 # we round the latitude and longitude to 5 decimal places to avoid problems of memory limitations
 #this is ok because the size of the grid is 0.009 (1/111) at the smallest (3 decimal places)
+#if grid size is 0.1 (100m), the number of decimal places is 4 at the smallest so this is still okay
+
 grid_data <- slf_tiny %>%
   mutate(latitude_grid = RoundTo(latitude, multiple = size_of_grid/111),
          longitude_grid = RoundTo(longitude, multiple = size_of_grid/85)) %>%
@@ -141,6 +149,18 @@ grid_data <- slf_tiny %>%
   summarise(#slf_present = any(slf_present),
             slf_established = any(slf_established)) %>% 
   ungroup()
+
+
+grid_data <- slf_tiny %>%
+  # mutate(latitude_grid = RoundTo(latitude, multiple = size_of_grid/111),
+         # longitude_grid = RoundTo(longitude, multiple = size_of_grid/85)) %>%
+  mutate(latitude_rounded = round(latitude, 5),
+         longitude_rounded = round(longitude, 5)) %>% 
+  group_by(bio_year, latitude_rounded, longitude_rounded) %>%
+  summarise(#slf_present = any(slf_present),
+            slf_established = any(slf_established)) %>% 
+  ungroup()
+
 
 knitr::kable(head(grid_data))
 dim(grid_data) #58331 rows
@@ -153,8 +173,11 @@ Let's look at the points on a map
 ```{r map all points}
 # Map surveys
 map <- ggplot(data = states) +
-    geom_point(data = grid_data,
-             aes(x = longitude_rounded, y = latitude_rounded, 
+    geom_point(
+      #data = grid_data,
+      data = slf_tiny,
+             # aes(x = longitude_rounded, y = latitude_rounded, 
+      aes(x = longitude, y = latitude,
                  col = slf_established)) + 
   geom_sf(data = states, alpha = 0) +
   geom_text(data = states, aes(X, Y, label = code), size = 2)
@@ -169,13 +192,15 @@ ggsave(file.path(here(), "figures", "jump_list", "1.map_allpoints.jpg"), map,
 
 # Number of positive surveys over all surveys (including negative surveys in CA!)
 dim(grid_data %>% filter(slf_established == T))[1] #now 7044
+# dim(slf_tiny %>% filter(slf_established == T))[1] #20457
 # Percentage of positive surveys
-dim(grid_data %>% filter(slf_established == T))[1]/dim(grid_data)[1] #12.08% 
+dim(grid_data %>% filter(slf_established == T))[1]/dim(grid_data)[1] #12.08%
+# dim(slf_tiny %>% filter(slf_established == T))[1]/dim(slf_tiny)[1] #6.31%
 ```
 
 
 
-The area surveyed is huge, but mostly made of negative surveys in the western USA
+The area surveyed is huge, but in the western USA, mostly made of negative surveys 
 we don't need to keep these areas because they are not useful to model anything!
 #### UPDATE: I don't think this chunk is necessary!
 ```{r remove far western points}
@@ -186,9 +211,9 @@ grid_data %>% filter(slf_established == T) %>%
 # The westernmost longitude with established populations is -80.6
 
 # We can eliminate points at longitudes west of -90 to eliminate some useless points
-# grid_data %<>% filter(longitude_rounded > -90)
-# dim(grid_data) #58144
-# dim(grid_data %>% filter(slf_established == T))[1] #the number of positive points did not change (7044)
+grid_data %<>% filter(longitude_rounded > -90)
+dim(grid_data) #58144
+dim(grid_data %>% filter(slf_established == T))[1] #the number of positive points did not change (7044)
 
 # Map it
 map <- ggplot(data = states) +
@@ -233,22 +258,29 @@ The table now has `r dim(grid_data)[1]` rows.
 ```{r calculate distances to the introduction point, echo = params$display, eval = params$run}
 
 #Coordinates of the introduction site, extracted from Barringer et al. 2015
-centroid2 <- data.frame(longitude_rounded = -75.675340, 
-                        latitude_rounded = 40.415240) #introduction point
-centroid <- c(grid_data %>% filter(slf_established == T) %>% 
-                summarise(mean(longitude_rounded)) %>% 
-                pull(),
-              grid_data %>% filter(slf_established == T) %>% 
-                summarise(mean(latitude_rounded)) %>% 
-                pull()) # centroid (very close!)
+# centroid2 <- data.frame(longitude_rounded = -75.675340, 
+                        # latitude_rounded = 40.415240) #introduction point
+centroid2 <- data.frame(longitude = -75.675340, 
+                        latitude = 40.415240) #introduction point
+
+# centroid <- c(grid_data %>% filter(slf_established == T) %>% 
+                # summarise(mean(longitude_rounded)) %>% 
+                # pull(),
+              # grid_data %>% filter(slf_established == T) %>% 
+                # summarise(mean(latitude_rounded)) %>% 
+                # pull()) # centroid (very close!)
 
 # centroid <- data.frame(latitude_rounded = mean(grid_data$latitude_rounded),
                        # longitude_rounded = mean(grid_data$longitude_rounded)
 
 #Compute distances to the introduction point, in km
-grid_data <- grid_data %>% 
-  mutate(DistToIntro = distm(grid_data[,c(3,2)], centroid, fun=distGeo)/1000)
 
+tic()
+grid_data <- grid_data %>%
+  mutate(DistToIntro = distm(grid_data[,c(3,2)], centroid2, fun=distGeo)/1000)
+toc()
+# grid_data <- slf_tiny %>% 
+  # mutate(DistToIntro = geosphere::distm(slf_tiny[,c(5,4)], centroid2, fun=distGeo)/1000)
 
 # We could create a new column containing a more detailed status (established vs present vs undetected)
 # but since we only care about established populations, we can just keep the column slf_established!
@@ -271,7 +303,9 @@ grid_data <- grid_data %>%
 # grid_data$Status <- factor(grid_data$Status, levels = c("Undetected", "Present", "Established"))
 
 # Save the grid file = points with their distance to the introduction site
-write.csv(grid_data, file.path(here(), "exported-data", "grid_data.csv"), 
+# write.csv(grid_data, file.path(here(), "exported-data", "grid_data.csv"), 
+          # row.names = F)
+write.csv(grid_data, file.path(here(), "exported-data", "grid_data_norounding.csv"), 
           row.names = F)
 dim(grid_data)[1]
 # The number of rows must be 58,331 with 2014-2020 data
@@ -332,6 +366,10 @@ grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"),
 dim(grid_data)
 table(grid_data$bio_year)
 
+
+head(grid_data)
+# grid_data %<>% rename(latitude_rounded = latitude,
+                      # longitude_rounded = longitude)
 ```
 
 Now we need to figure out the best set of parameters to find the accurate number of jumps, i.e. the highest number of jumps detected by the algorithm. To do so, we run several analysis with extreme sets of parameters to get closer to a plateau in the number of jumps that are found, before a finer optimization is done.
@@ -347,10 +385,12 @@ Results_prev = -1
 centroid <- c(long = -75.675340, lat = 40.415240)
 
 # Attribute the geographical sector of each point for each rotation
+tic()
 slfdata <- attribute_sectors(grid_data, 
                              nb_sectors = i, 
                              centroid = centroid, 
                              rotation = initial_number_rotations)
+toc()
 
 slfdata_long <- slfdata %>% 
   pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", 
@@ -363,6 +403,7 @@ Results <- find_jumps(slfdata_long, gap_size = 15, bio_year = c(2014:2020))
 dataset <- slfdata_long
 
 # Run the loop to find the approximate number of sectors recommended
+tic()
 while (dim(Results$Jump)[1] > Results_prev){
   Results_prev <- dim(Results$Jump)[1]
   j = i
@@ -382,6 +423,7 @@ while (dim(Results$Jump)[1] > Results_prev){
   rm(slfdata)
   rm(slfdata_long)
 }
+toc()
 
 print(paste0("The right number of sectors is likely between ", j, " and ", i))
 
@@ -405,9 +447,10 @@ slfdata_long <- slfdata %>%
   pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", 
                values_to = "sectors_nb", names_prefix = "rotation", 
                names_transform = list(rotation_nb = as.integer)) 
+
 Results <- find_jumps(slfdata_long, gap_size = 15, bio_year = c(2014:2020))
 
-
+tic()
 while (dim(Results$Jump)[1] > Results_prev){
   Results_prev <- dim(Results$Jump)[1]
   k = r
@@ -427,8 +470,11 @@ while (dim(Results$Jump)[1] > Results_prev){
   rm(slfdata_long)
 
 }
+toc()
 
 print(paste0("The number of rotations is likely between ", k, " and ", r))
+
+dim(Results$Jump)
 ```
 
 The number of rotations is close to 2-7 (2-7 without centroid).
@@ -438,8 +484,8 @@ Use these approximations to run the optimization program!
 # Here we are going to run the number of sectors of every multiple of 4 between 20 and 32
 # and the number of rotations between 1 and 10
 
-sectors = c(20, 24, 28, 32, 36)
-rotations = c(1, 2, 3, 4, 5, 6, 7)
+sectors = c(20, 28, 36)
+rotations = c(1, 4, 8, 12)
 centroid <- c(-75.675340, 40.415240)
   
 optim_list <- data.frame(s = NULL,
@@ -454,7 +500,7 @@ optim_list <- data.frame(s = NULL,
                          theta = NULL,
                          DistToSLF = NULL)
 
-
+tic()
 for (s in sectors){
   for (r in rotations){
     i = 1
@@ -476,22 +522,24 @@ for (s in sectors){
     rm(slfdata_long)
   }
 }
+toc()
 
 # Create a folder if it does not exist
 testNmkdir("tables")
 
 # List of jumps
 head(optim_list)
-write.csv(optim_list, file.path(here(), "tables", "optim_list.csv"))
+write.csv(optim_list, file.path(here(), "tables", "optim_list100m.csv"))
 
 # List of the number of jumps found per combination
 optim_sum <- optim_list %>% group_by(s, r) %>% summarise(jumps = n())
 head(optim_sum)
 max(optim_sum$jumps)
 
-write.csv(optim_sum, file.path(here(), "tables", "optim_jumps.csv"))
+write.csv(optim_sum, file.path(here(), "tables", "optim_jumps100m.csv"))
 
 ```
+
 
 ```{r compare with and without centroid}
 
@@ -542,7 +590,7 @@ optim_plot <- ggplot(data = optim_sum,
 
 optim_plot
 
-ggsave(file.path(here(), "figures", "jump_list", "4.optim_plot.jpg"), 
+ggsave(file.path(here(), "figures", "jump_list", "4.optim_plot100m.jpg"), 
        optim_plot)
 ```
 
@@ -554,13 +602,13 @@ Rerun it to save results.
 ```{r run best dataset and save results}
 
 # Right combination:
-optim_sum %>% filter(s == 20, r == 3)
+optim_sum %>% filter(s == 28, r == 4)
 centroid <- c(-75.675340, 40.415240)
 
 slfdata <- attribute_sectors(grid_data, 
-                             nb_sectors = 20, 
+                             nb_sectors = 28, 
                              centroid = centroid, 
-                             rotation = 3)
+                             rotation = 4)
 
 slfdata_long <- slfdata %>% 
   pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", 
@@ -572,9 +620,9 @@ Results <- find_jumps(slfdata_long, gap_size = 15, bio_year = c(2014:2020))
 dim(Results$Jump)
 head(Results$Dist)
 
-write.csv(Results$Dist, file.path(here(), "exported-data", "thresholds.csv"), 
+write.csv(Results$Dist, file.path(here(), "exported-data", "thresholds100m.csv"), 
           row.names = F)
-write.csv(Results$Jump, file.path(here(), "exported-data", "jumps.csv"), 
+write.csv(Results$Jump, file.path(here(), "exported-data", "jumps100m.csv"), 
           row.names = F)
 ```
 
@@ -628,6 +676,8 @@ ggsave(file.path(here(), "figures", "jump_list", "map_jumps.jpg"),
 ```{r load datasets}
 
 jumps <- read.csv(file.path(here(), "exported-data", "jumps.csv"), h = T)
+dim(jumps)
+head(jumps)
 grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"), 
                       h = T)
 centroid <- data.frame(longitude_rounded = -75.675340, 
@@ -642,6 +692,7 @@ Find points with important outbreaks
 
 # The function needs to run separately for each set of parameters since the list of jumps is not the same!
 Jump_groups <- group_jumps(jumps, gap_size = 15)
+unique(Jump_groups$Group)
 
 #Check how many points there are per group
 Jump_groups %>% group_by(bio_year, Group) %>% summarise(Nb = n()) %>% 
@@ -661,7 +712,7 @@ leaflet(data = Jump_groups) %>%
                        color = ~pal(Group), 
                        label = ~Group)  
 
-write.csv(Jump_groups, file.path(here(), "exported-data", "jump_groups.csv"), 
+write.csv(Jump_groups, file.path(here(), "exported-data", "jump_groups100m.csv"), 
           row.names = F)
 ```
 

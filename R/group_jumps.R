@@ -18,7 +18,7 @@ group_jumps <- function(jumps, gap_size = 15) {
   
   # 1. Populate the list of neighbors for each jump
   
-  jumps %<>% add_column(ID = seq(1:length(jumps$DistToIntro)),
+  jumps %<>% add_column(ID = seq(1:dim(jumps)[1]),
                         Neighbors = list(NULL))
   
   # Calculate all pairwise distances between points

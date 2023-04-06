@@ -103,6 +103,10 @@ dim(grid_data) #58144
 unique(grid_data$bio_year)
 dim(grid_data %>% filter(slf_established == T))
 
+# We can eliminate points at longitudes west of -90 to eliminate some useless points
+grid_data %<>% filter(longitude_rounded > -90)
+dim(grid_data) #58144
+dim(grid_data %>% filter(slf_established == T))[1] #the number of positive points did not change (7044)
 ```
 
 
@@ -116,16 +120,18 @@ To avoid biasing the landscape analysis towards significance by using negative p
 grid_data <- st_as_sf(x = grid_data, 
                                coords = c("longitude_rounded", "latitude_rounded"), 
                                crs = "EPSG:4269", remove = F)
-grid_data_positive <- grid_data %>% filter(slf_established == TRUE)
+grid_data_WGS <- st_transform(grid_data, crs = "ESRI:102010")
+grid_data_positive <- grid_data_WGS %>% filter(slf_established == TRUE)
 dim(grid_data_positive) #7044
 hull <- st_convex_hull(st_union(grid_data_positive))
 
 st_area(hull)
+st_crs(hull)
 
 
-early_surveys <- grid_data_positive %>% filter(bio_year %in% c(2014:2017))
-early_hull <- st_convex_hull(st_union(early_surveys))
-st_area(early_hull)
+# early_surveys <- grid_data_positive %>% filter(bio_year %in% c(2014:2017))
+# early_hull <- st_convex_hull(st_union(early_surveys))
+# st_area(early_hull)
 
 #Verify that no positive point is left in grid_data
 setdiff(grid_data, grid_data_positive) %>% filter(slf_established) #0
@@ -153,10 +159,12 @@ dim(grid_data %>% filter(slf_established)) #7044
 
 hull <- st_read(file.path(here(), "figures", "GIS", "chull.shp"), quiet = T) 
 st_crs(hull)
+hull_WGS <- st_transform(hull, crs = "ESRI:102010")
+
 
 # We need to make a small buffer around the chull so that points that make the bounding box are included in it!
-chull <- st_buffer(hull, dist = 100)
-grid_data_chull <- st_intersection(grid_data, chull)
+chull <- st_buffer(hull_WGS, dist = 100)
+grid_data_chull <- st_intersection(grid_data_WGS, chull)
 dim(grid_data_chull) #45964, lower than grid_data
 dim(grid_data_chull %>% filter(slf_established)) #7044, same as grid_data
 head(grid_data_chull)
@@ -204,7 +212,7 @@ grid_unique_layer <- st_as_sf(x = grid_chull_unique, coords = c("longitude_round
 # Visualize the data
 ggplot(data = states) +
     geom_sf(data = states, fill = "white") +
-  geom_sf(data = grid_data_chull, col = "red") +
+  # geom_sf(data = grid_data_chull, col = "red") +
   geom_sf(data = grid_unique_layer, col = "blue") +
     labs(x = "Longitude", y = "Latitude") +
   coord_sf(xlim = c(-88, -68), ylim = c(33, 46), expand = FALSE)
@@ -499,7 +507,9 @@ grid_data_chull %<>% mutate(Category_out = ifelse(slf_established == TRUE, "Diff
 
 # Next load the dataset that contains all jumpers identified by sets of parameters
 jumpers <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
+jumpers <- read.csv(file.path(here(), "exported-data", "jump_groups.csv"))
 jumpers %<>% add_column(Category = "Jumpers")
+head(jumpers)
 ```
 
 
@@ -508,7 +518,7 @@ jumpers %<>% add_column(Category = "Jumpers")
 
 # Put jumpers into the grid data and complete with the rest
 grid_full <- grid_data_chull %>% 
-  left_join(jumpers %>% select(latitude_rounded, longitude_rounded, slf_established, bio_year, Category)) %>% 
+  left_join(jumpers %>% select(latitude_rounded, longitude_rounded, slf_established, bio_year, Category, Group)) %>% 
   mutate(Category = ifelse(is.na(Category), Category_out, Category)) %>% 
   select(-Category_out)
 
@@ -517,6 +527,7 @@ dim(grid_full %>% filter(Category == "Jumpers"))[1] == dim(jumpers)[1]
 grid_full %<>% rename(Category_full = Category)
 
 grid_full %>% group_by(Category_full) %>% count()
+head(grid_full)
 ```
 
 
@@ -555,7 +566,9 @@ Count each point only once as positive or negative (summarise data for each poin
 ```{r generate a grid of unique points for situation as of 2020}
 
 slf_observed <- read.csv(file.path(here(), "exported-data", "slf_observed.csv"))
+slf_observed <- grid_full
 dim(slf_observed)
+head(slf_observed)
 
 # Show the number of duplicates per point
 slf_observed %>% group_by(latitude_rounded, longitude_rounded) %>% count() %>% 
@@ -567,17 +580,25 @@ slf_observed$Category_rarefied <- factor(slf_observed$Category_rarefied, levels 
 slf_observed$Category_full <- factor(slf_observed$Category_full, levels = c("Negatives", "Diffusers", "Jumpers"))
 
 # Translate factors into ordinal
-slf_uptodate <- slf_observed %>% mutate(Category_rare_num = as.numeric(Category_rarefied),
-                    Category_full_num = as.numeric(Category_full)) %>%  
+slf_uptodate <- slf_observed %>% mutate(
+  #Category_rare_num = as.numeric(Category_rarefied),
+  Category_full_num = as.numeric(Category_full)) %>%  
   group_by(latitude_rounded, longitude_rounded, DistToRail, DistToRoad, DistIntRlRd) %>% 
-  summarize(Category_rare_max = max(Category_rare_num),
-            Category_full_max = max(Category_full_num)) %>% 
-  mutate(Category_rare = recode(Category_rare_max, "1" = "Negatives", "2" = "Diffusers", "3" = "Jumpers"),
-         Category_full = recode(Category_full_max, "1" = "Negatives", "2" = "Diffusers", "3" = "Jumpers")) %>% 
-  select(-Category_rare_max, -Category_full_max)
+  summarize(
+    #Category_rare_max = max(Category_rare_num),
+    Category_full_max = max(Category_full_num)) %>% 
+  mutate(
+    #Category_rare = recode(Category_rare_max, "1" = "Negatives", "2" = "Diffusers", "3" = "Jumpers"),
+    Category_full = recode(Category_full_max, "1" = "Negatives", "2" = "Diffusers", "3" = "Jumpers")) %>% 
+  select(
+    #-Category_rare_max, 
+    -Category_full_max)
   
 
 dim(slf_uptodate) #32,911
+
+head(jumpers)
+slf_uptodate %<>% left_join(jumpers %>% select(latitude_rounded, longitude_rounded, Group))
 head(slf_uptodate)
 
 # Save this file
@@ -853,99 +874,100 @@ There is major autocorrelation in the dataset! We will use a linear model to com
 
 
 
-## 2. Linear model + autocorrelation coefficient 
+## 2. Linear model + random effect
 
 ```{r load model data}
 
 slf_uptodate <- read.csv(file.path(here(), "exported-data", "slf_obs_uptodate.csv"))
 dim(slf_uptodate) #32911
+head(slf_uptodate)
 
 # Let's try with just jumpers and diffusers as a test
 # slf_uptodate %<>% filter(Category_full %in% c("Jumpers", "Diffusers")) 
 # dim(slf_uptodate) #5901
 ```
 
-Because of large differences in sample sizes between categories, we need to resample diffusers and negatives 10,000 times with n = n(Jumpers)
-Next we calculate the autocorrelation coefficient for these datasets
-Finally we run the model
+Because of large differences in sample sizes between categories, we need to resample negatives with n = n(Jumpers), then run the model, x 10,000 times 
 
 ### Full dataset
 Note: a version with only diffusers and jumpers was calculated and is called "full_pos"
 ```{r lm with ac, echo = FALSE}
+library(lme4)
 ModelsRail = NULL
 ModelsRoad = NULL
 ModelsInt = NULL
 
 # Define the datasets
-Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
+#Diffusers_full <- slf_uptodate %>% filter(Category_full == "Diffusers")
 Negatives_full <- slf_uptodate %>% filter(Category_full == "Negatives")
 Jumpers_full <- slf_uptodate %>% filter(Category_full == "Jumpers")
-njumpers_full = dim(Jumpers_full)
+njumpers_full = dim(Jumpers_full)[1]
 
 
 for (i in 1:10000){
   # One iteration
   # Sample diffusers and negatives
-  Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), size = njumpers_full, replace = FALSE),]
+  # Diffusers_full_sample <- Diffusers_full[sample(nrow(Diffusers_full), size = njumpers_full, replace = FALSE),]
   Negatives_full_sample <- Negatives_full[sample(nrow(Negatives_full), size = njumpers_full, replace = FALSE),]
-
   # Make a new dataset
-  dataset <- rbind(Jumpers_full, Diffusers_full_sample
-                   , Negatives_full_sample)
-  
+  dataset <- rbind(Jumpers_full, 
+                   #Diffusers_full_sample,
+                   Negatives_full_sample)
+  dataset <- group_jumps(dataset, gap_size = 15)
   #Make a matrix of coordinates 
-  coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
+  # coords <- as.matrix(cbind(dataset$longitude_rounded,dataset$latitude_rounded))
   
   
   ## 1. Model for railroad distance:
   # Calculate ac coefficients
-  ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_railroad)){ print("Error AC railroad")}
-  dataset %<>% add_column(ac_rail = ac_railroad)
+  # ac_railroad <- autocov_dist(dataset$DistToRail, coords, nbs = 500, type = "inverse", longlat = T)
+  # if (dim(dataset)[1] != length(ac_railroad)){ print("Error AC railroad")}
+  # dataset %<>% add_column(ac_rail = ac_railroad)
+  
   # Run model
-  modRail_ac <- lm(log(DistToRail+1) ~ Category_full + ac_rail, data = dataset)
-  # library(RVAideMemoire)
+  modRail <- lmer(log(DistToRail+1) ~ Category_full + (1|Group), data = dataset)
+      # library(RVAideMemoire)
   # plotresid(modRail_ac)
-  summary_modRailac <- summary(modRail_ac)
+  anova_modRail <- car::Anova(modRail)
+  summary_modRail <- summary(modRail)
   ModelsRail <- rbind(ModelsRail, 
-                      c(summary_modRailac$coefficients[c(1:4, 13:16)], #for pos only, use 1:3, 10:12 
-                      summary_modRailac$r.squared, 
-                      summary_modRailac$adj.r.squared)) 
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; 
-  #p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+                      c(summary_modRail$coefficients[c(1:2)], 
+                      anova_modRail$`Pr(>Chisq)`)) 
+  #estimates: intercept, diffusers-negatives; 
+  #p-values: category
   
   
-  
-  ## 2. Model for road distance:
+    ## 2. Model for road distance:
   # Calculate ac coefficients
-  ac_road <- autocov_dist(dataset$DistToRoad, coords, nbs = 500, type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_road)){ print("Error AC road")}
-  dataset %<>% add_column(ac_road = ac_road)
+  # ac_road <- autocov_dist(dataset$DistToRoad, coords, nbs = 500, type = "inverse", longlat = T)
+  # if (dim(dataset)[1] != length(ac_road)){ print("Error AC road")}
+  # dataset %<>% add_column(ac_road = ac_road)
   # Run model
-  modRoad_ac <- lm(log(DistToRoad+1) ~ Category_full + ac_road, data = dataset)
+  modRoad <- lmer(log(DistToRoad+1) ~ Category_full + (1|Group), data = dataset)
   # plotresid(modRoad_ac)
-  summary_modRoadac <- summary(modRoad_ac)
+  anova_modRoad <- car::Anova(modRoad)
+  summary_modRoad <- summary(modRoad)
   ModelsRoad <- rbind(ModelsRoad, 
-                      c(summary_modRoadac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modRoadac$r.squared, 
-                      summary_modRoadac$adj.r.squared)) 
-  #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
+                      c(summary_modRoad$coefficients[c(1:2)],  #for pos only, use 1:3, 10:12 
+                      anova_modRoad$`Pr(>Chisq)`)) 
+  #estimates: intercept, diffusers-negatives; 
+  #p-values: category
   
   
   
   ## 3. Model for intersections:
   # Calculate ac coefficients
-  ac_int <- autocov_dist(dataset$DistIntRlRd, coords, nbs = 500, type = "inverse", longlat = T)
-  if (dim(dataset)[1] != length(ac_int)){ print("Error AC int")}
-  dataset %<>% add_column(ac_int = ac_int)
+  # ac_int <- autocov_dist(dataset$DistIntRlRd, coords, nbs = 500, type = "inverse", longlat = T)
+  # if (dim(dataset)[1] != length(ac_int)){ print("Error AC int")}
+  # dataset %<>% add_column(ac_int = ac_int)
   # Run model
-  modInt_ac <- lm(log(DistIntRlRd+1) ~ Category_full + ac_int, data = dataset)
+  modInt <- lmer(log(DistIntRlRd+1) ~ Category_full + (1|Group), data = dataset)
   # plotresid(modInt_ac)
-  summary_modIntac <- summary(modInt_ac)
+  anova_modInt <- car::Anova(modInt)
+  summary_modInt <- summary(modInt)
   ModelsInt <- rbind(ModelsInt, 
-                     c(summary_modIntac$coefficients[c(1:4, 13:16)],  #for pos only, use 1:3, 10:12 
-                      summary_modIntac$r.squared, 
-                      summary_modIntac$adj.r.squared)) 
+                     c(summary_modInt$coefficients[c(1:2)],  #for pos only, use 1:3, 10:12 
+                      anova_modRoad$`Pr(>Chisq)`)) 
   #estimates: intercept, diffusers-jumpers, diffusers-negatives, autocorrelation coef; p-values: diffusers-jumpers, diffusers-negatives, autocorrelation coef
   
   
@@ -956,25 +978,17 @@ for (i in 1:10000){
 
 
 ModelsRail <- data.frame(ModelsRail)
-names(ModelsRail) = c("Int_est", "DJ_est", #"DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", #"DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRail, file.path(here(), "tables", "ModelsRail_full_pos.csv"))
+names(ModelsRail) = c("Int_est", "NJ_est", "NJp")
+write.csv(ModelsRail, file.path(here(), "tables", "ModelsRail_full_lmer.csv"))
 
 ModelsRoad <- data.frame(ModelsRoad)
-names(ModelsRoad) = c("Int_est", "DJ_est", #"DN_est", 
-                      "AC_est",
-                      "Intp", "DJp", #"DNp", 
-                      "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsRoad, file.path(here(), "tables", "ModelsRoad_full_pos.csv"))
+names(ModelsRoad) = c("Int_est", "NJ_est", "NJp")
+write.csv(ModelsRoad, file.path(here(), "tables", "ModelsRoad_full_lmer.csv"))
 
 ModelsInt <- data.frame(ModelsInt)
-names(ModelsInt) = c("Int_est", "DJ_est", #"DN_est", 
-                     "AC_est",
-                      "Intp", "DJp", #"DNp", 
-                     "ACp", "Rsquared", "Adj Rsquared")
-write.csv(ModelsInt, file.path(here(), "tables", "ModelsInt_full_pos.csv"))
+names(ModelsInt) = c("Int_est", "NJ_est", "NJp")
+write.csv(ModelsInt, file.path(here(), "tables", "ModelsInt_full_lmer.csv"))
+
 ```
 
 
@@ -982,21 +996,11 @@ Visualize full dataset - DistToRail data
 ```{r visualize full DistToRail data}
 ModelsRail <- read.csv(file.path(here(), "tables", "linear_models_transports", "ModelsRail_full.csv"))
 
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  # DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
+ModelsRail %>% mutate(NJsignif = ifelse(NJp > 0.05, "NS", "S")) %>% 
+  count(NJsignif)
 #DN NS = 43, S = 9957 --> difference between negatives and diffusers extremely significant
 #DJ NS = 17, S = 9983 --> difference between diffusers and jumpers extremely significant
 
-
-# Same only with positives (jumpers and diffusers)
-ModelsRail <- read.csv(file.path(here(), "tables",  "ModelsRail_full_pos.csv"))
-
-ModelsRail %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DNsignif)
-#DJ NS = 5, S = 9995 --> same as DJN
 ```
 
 
@@ -1004,21 +1008,11 @@ Visualize full dataset - DistToRoad data
 ```{r visualize full DistToRail data}
 ModelsRoad <- read.csv(file.path(here(), "tables", "linear_models_transports", "ModelsRoad_full.csv"))
 
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
+ModelsRoad %>% mutate(NJsignif = ifelse(NJp > 0.05, "NS", "S")) %>% 
+  count(NJsignif)
 #DN NS = 8528, S = 1472 --> difference between negatives and diffusers non-significant
 #DJ NS = 296, S = 9704 --> difference between diffusers and jumpers is significant
 
-
-# Same, only with positives
-ModelsRoad <- read.csv(file.path(here(), "tables", "ModelsRoad_full_pos.csv"))
-
-ModelsRoad %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-# DJ NS = 239, S = 9761 --> same as DJN
 ```
 
 
@@ -1027,21 +1021,11 @@ Visualize full dataset - DistIntRlRd data
 
 ModelsInt <- read.csv(file.path(here(), "tables", "linear_models_transports", "ModelsInt_full.csv"))
 
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  DNsignif = ifelse(DNp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
+ModelsInt %>% mutate(NJsignif = ifelse(NJp > 0.05, "NS", "S")) %>% 
+  count(NJsignif)
 #DN, NS = 216, S = 9784 --> difference between negatives and diffusers is significant
 #DJ, NS = 9, S = 9991 --> difference between diffusers and jumpers is extremely significant
 
-
-# Positives only
-ModelsInt <- read.csv(file.path(here(), "tables", "ModelsInt_full_pos.csv"))
-
-ModelsInt %>% mutate(DJsignif = ifelse(DJp > 0.05, "NS", "S"),
-                  ACsignif = ifelse(ACp > 0.05, "NS", "S")) %>% 
-  count(DJsignif)
-#DJ, NS = 3, S = 9997 --> same as DJN
 ```
 
 
