@@ -1,5 +1,5 @@
 ---
-title: "#1: Isolating jump dispersal and diffusive spread"
+title: "#1: Isolating dispersal jumps and diffusive spread"
 author: 
 - Nadege Belouard^[Temple University, nadege.belouard@gmail.com]
 - Sebastiona De Bona^[Temple University, sebastiano.debona@temple.edu]
@@ -32,27 +32,19 @@ Considering that the expansion of the invasion is heterogeneous in space, we div
 
 
 ```{r setup for rendering, messages = F, warning = F}
-# First we set parameters and install all the necessary packages
-knitr::opts_chunk$set(dpi = 300, 
-                      warning = FALSE, 
-                      message = FALSE, 
-                      echo = FALSE)
-
 # attaching necessary packages
 library(tidyverse)
 library(magrittr)
 library(sf)
 library(maps)
-library(DescTools)
-# library(reshape2)
-library(geosphere)
 library(ggplot2)
 library(knitr)
 library(here)
 library(slfjumps)
-library(purrr)
 library(leaflet)
-
+# library(DescTools)
+# library(geosphere)
+# library(purrr)
 sf::sf_use_s2(FALSE)
 ```
 
@@ -199,7 +191,12 @@ dim(grid_data %>% filter(slf_established == T))[1]/dim(grid_data)[1] #12.08%
 ```
 
 
+## Introduction point
+Pick the format you need
+```{r introduction point}
+#Coordinates of the introduction site, extracted from Barringer et al. 2015
 
+<<<<<<< HEAD:vignettes/015_Jump_dispersal_list.Rmd
 The area surveyed is huge, but in the western USA, mostly made of negative surveys 
 we don't need to keep these areas because they are not useful to model anything!
 #### UPDATE: I don't think this chunk is necessary!
@@ -214,49 +211,34 @@ grid_data %>% filter(slf_established == T) %>%
 grid_data %<>% filter(longitude_rounded > -90)
 dim(grid_data) #58144
 dim(grid_data %>% filter(slf_established == T))[1] #the number of positive points did not change (7044)
+=======
+# These are the coordinates of the introduction point:
+# As a table (for distances calculation):
+centroid_df <- data.frame(longitude_rounded = -75.675340, 
+                        latitude_rounded = 40.415240) 
+# As a vector (for jump analysis):
+centroid_vec <- c(-75.675340, 40.415240)
 
-# Map it
-map <- ggplot(data = states) +
-  geom_point(data = grid_data,
-             aes(x = longitude_rounded, y = latitude_rounded, 
-                 col = slf_established),
-             shape = 19) +
-  geom_sf(data = states, alpha = 0) +
-  geom_text(data = states, aes(X, Y, label = code), size = 2)
+# These are the coordinates of the centroid (very close to the introduction point!)
+# As a data frame: 
+# centroid <- data.frame(latitude_rounded = mean(grid_data$latitude_rounded),
+                       # longitude_rounded = mean(grid_data$longitude_rounded)
+>>>>>>> c3e2685d4fedcd60a8ecd575a7df27566f0c215c:vignettes/010_Jump_list.Rmd
 
-map
+# As a vector:
+# centroid <- c(grid_data %>% filter(slf_established == T) %>%
+#                 summarise(mean(longitude_rounded)) %>% pull(),
+#               grid_data %>% filter(slf_established == T) %>% 
+#                 summarise(mean(latitude_rounded)) %>% pull())
 
-ggsave(file.path(here(), "figures", "jump_list", "2.map_eastpoints.jpg"),
-       map, width = 5, height = 5)
-
-
-# Map only positive points
-map_pos <- ggplot(data = states) +
-  geom_point(data = grid_data %>% filter(slf_established == T),
-             aes(x = longitude_rounded, y = latitude_rounded),
-             shape = 19) +
-  geom_sf(data = states, alpha = 0) +
-  geom_text(data = states, aes(X, Y, label = code), size = 2) +
-  coord_sf(xlim = c(-88, -70), ylim = c(35, 45), expand = FALSE)
-  
-map_pos
-
-ggsave(file.path(here(), "figures", "jump_list", "3.map_pospoints.jpg"),
-       map_pos, width = 5, height = 5)
-
-# Number of positive surveys did not change
-dim(grid_data %>% filter(slf_established == T))[1] #now 7044
-# Percentage of positive surveys
-dim(grid_data %>% filter(slf_established == T))[1]/dim(grid_data)[1] #now 12.11%
 ```
-
-The table now has `r dim(grid_data)[1]` rows.
 
 
 ## Distances and status calculation
 
 ```{r calculate distances to the introduction point, echo = params$display, eval = params$run}
 
+<<<<<<< HEAD:vignettes/015_Jump_dispersal_list.Rmd
 #Coordinates of the introduction site, extracted from Barringer et al. 2015
 # centroid2 <- data.frame(longitude_rounded = -75.675340, 
                         # latitude_rounded = 40.415240) #introduction point
@@ -274,6 +256,11 @@ centroid2 <- data.frame(longitude = -75.675340,
                        # longitude_rounded = mean(grid_data$longitude_rounded)
 
 #Compute distances to the introduction point, in km
+=======
+#Compute distances to the introduction point, in km
+grid_data <- grid_data %>% 
+  mutate(DistToIntro = distm(grid_data[,c(3,2)], centroid_df, fun=distGeo)/1000)
+>>>>>>> c3e2685d4fedcd60a8ecd575a7df27566f0c215c:vignettes/010_Jump_list.Rmd
 
 tic()
 grid_data <- grid_data %>%
@@ -382,13 +369,12 @@ The parameter that increases most the number of jumps is the number of sectors, 
 i = 12
 initial_number_rotations = 10
 Results_prev = -1
-centroid <- c(long = -75.675340, lat = 40.415240)
 
 # Attribute the geographical sector of each point for each rotation
 tic()
 slfdata <- attribute_sectors(grid_data, 
                              nb_sectors = i, 
-                             centroid = centroid, 
+                             centroid = centroid_vec, 
                              rotation = initial_number_rotations)
 toc()
 
@@ -400,14 +386,13 @@ slfdata_long <- slfdata %>%
 # Find the jumps
 Results <- find_jumps(slfdata_long, gap_size = 15, bio_year = c(2014:2020))
 
-dataset <- slfdata_long
-
 # Run the loop to find the approximate number of sectors recommended
 tic()
 while (dim(Results$Jump)[1] > Results_prev){
   Results_prev <- dim(Results$Jump)[1]
   j = i
   i = i + 8
+  print(paste0("Sectors: ", i))
 
   slfdata <- attribute_sectors(grid_data, 
                                nb_sectors = i, 
@@ -430,18 +415,18 @@ print(paste0("The right number of sectors is likely between ", j, " and ", i))
 rm(Results)
 ```
 
-The right number of sectors is close to 20-28.
-(28-36 without centroid)
+The right number of sectors is close to 20-28 (28-36 without centroid)
 
 ```{r first approximation of the number of rotations}
 # Then, look at the number of rotations needed
 # Run this on the highest number of sectors found above (i).
+i = 28
 r = 2
 Results_prev = -1
 
 slfdata <- attribute_sectors(grid_data, 
                              nb_sectors = i, 
-                             centroid = centroid, 
+                             centroid = centroid_vec, 
                              rotation = r)
 slfdata_long <- slfdata %>% 
   pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", 
@@ -455,13 +440,14 @@ while (dim(Results$Jump)[1] > Results_prev){
   Results_prev <- dim(Results$Jump)[1]
   k = r
   r = r + 5
+  print(paste0("Rotations: ", r))
 
   slfdata <- attribute_sectors(grid_data, 
                                nb_sectors = i, 
                                centroid = centroid, 
                                rotation = r)
   slfdata_long <- slfdata %>% 
-  pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", 
+    pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", 
                values_to = "sectors_nb", names_prefix = "rotation", 
                names_transform = list(rotation_nb = as.integer)) 
   Results <- find_jumps(slfdata_long, gap_size = 15, bio_year = c(2014:2020))
@@ -484,21 +470,28 @@ Use these approximations to run the optimization program!
 # Here we are going to run the number of sectors of every multiple of 4 between 20 and 32
 # and the number of rotations between 1 and 10
 
+<<<<<<< HEAD:vignettes/015_Jump_dispersal_list.Rmd
 sectors = c(20, 28, 36)
 rotations = c(1, 4, 8, 12)
 centroid <- c(-75.675340, 40.415240)
   
+=======
+sectors = c(16, 20, 24, 28, 32, 36)
+rotations = c(1, 2, 3, 4, 5, 6, 7)
+head(grid_data)
+
+>>>>>>> c3e2685d4fedcd60a8ecd575a7df27566f0c215c:vignettes/010_Jump_list.Rmd
 optim_list <- data.frame(s = NULL,
                          r = NULL,
                          DistToIntro = NULL,
                          bio_year = NULL,
                          latitude_rounded = NULL,
                          longitude_rounded = NULL,
-                         slf_present = NULL,
-                         slf_established = NULL,
-                         # Status = NULL,
-                         theta = NULL,
-                         DistToSLF = NULL)
+                         # slf_present = NULL,
+                         slf_established = NULL#,
+                         # theta = NULL,
+                         # DistToSLF = NULL
+                         )
 
 tic()
 for (s in sectors){
@@ -507,7 +500,7 @@ for (s in sectors){
     print(paste0("Sectors: ", s, ", rotations: ", r))
     slfdata <- attribute_sectors(grid_data, 
                                  nb_sectors = s, 
-                                 centroid = centroid, 
+                                 centroid = centroid_vec, 
                                  rotation = r)
     slfdata_long <- slfdata %>% 
       pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", 
@@ -540,6 +533,11 @@ write.csv(optim_sum, file.path(here(), "tables", "optim_jumps100m.csv"))
 
 ```
 
+<<<<<<< HEAD:vignettes/015_Jump_dispersal_list.Rmd
+=======
+The maximum number of jumps founds is 135.
+
+>>>>>>> c3e2685d4fedcd60a8ecd575a7df27566f0c215c:vignettes/010_Jump_list.Rmd
 
 ```{r compare with and without centroid}
 
@@ -602,6 +600,7 @@ Rerun it to save results.
 ```{r run best dataset and save results}
 
 # Right combination:
+<<<<<<< HEAD:vignettes/015_Jump_dispersal_list.Rmd
 optim_sum %>% filter(s == 28, r == 4)
 centroid <- c(-75.675340, 40.415240)
 
@@ -609,6 +608,14 @@ slfdata <- attribute_sectors(grid_data,
                              nb_sectors = 28, 
                              centroid = centroid, 
                              rotation = 4)
+=======
+optim_sum %>% filter(s == 20, r == 3)
+
+slfdata <- attribute_sectors(grid_data, 
+                             nb_sectors = 20, 
+                             centroid = centroid_vec, 
+                             rotation = 3)
+>>>>>>> c3e2685d4fedcd60a8ecd575a7df27566f0c215c:vignettes/010_Jump_list.Rmd
 
 slfdata_long <- slfdata %>% 
   pivot_longer(cols = starts_with("rotation"), names_to = "rotation_nb", 
@@ -631,9 +638,6 @@ The jump dispersal events found by the function can be visualized on a map. Jump
 
 ```{r map all jumps per params set}
 
-centroid <- data.frame(longitude_rounded = -75.675340, 
-                       latitude_rounded = 40.415240)
-
 jumps <- Results$Jump
 
 # All jumps one set
@@ -642,7 +646,7 @@ map_jumps <- ggplot(data = states) +
                filter(slf_established == T, bio_year %in% c(2014:2020)),
              aes(x = longitude_rounded, y = latitude_rounded), 
              size = 1, shape = 19, col = "grey") +
-  geom_point(data = centroid,
+  geom_point(data = centroid_df,
              aes(x = longitude_rounded, y = latitude_rounded), 
              col = "blue", shape = 4, size = 5) +
   geom_point(data = jumps, 
@@ -680,9 +684,6 @@ dim(jumps)
 head(jumps)
 grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"), 
                       h = T)
-centroid <- data.frame(longitude_rounded = -75.675340, 
-                       latitude_rounded = 40.415240)
-
 ```
 
 
@@ -765,8 +766,9 @@ write.csv(Jumps_full_rarefied,
 ```
 
 
-# 4. Analysis
+# 4. Preliminary analysis
 
+Load all datasets
 ```{r load datasets for analysis}
 Jumps <- read.csv(file.path(here(), "exported-data", "jumps_full_rarefied.csv"))
 Jumps %<>% mutate(Rarefied = ifelse(is.na(Rarefied), "Full", "Rarefied"))
@@ -774,7 +776,7 @@ dim(Jumps)
 Jumps %>% filter(bio_year == 2020)
 Jumps$Rarefied <- factor(Jumps$Rarefied, levels = c( "Full", "Rarefied"))
 
-Thresholds <- read.csv(file.path(here(), "./exported-data/thresholds.csv"))
+Thresholds <- read.csv(file.path(here(), "exported-data", "thresholds.csv"))
 grid_data <- read.csv(file.path(here(), "exported-data", "grid_data.csv"), h=T)
 centroid <- data.frame(longitude_rounded = -75.675340, 
                        latitude_rounded = 40.415240)
@@ -953,7 +955,7 @@ We can now look at how the radius of the invasion increases over time, when diff
 ```{r figure total spread/diffusive spread for slf established, fig.cap = "Evolution of the radius of the invasion over time, when diffusive spread and jump dispersal are separated", echo=FALSE, message = FALSE}
 
 #Data on total spread
-Thresholds <- read.csv(file.path(here(), "./exported-data/thresholds.csv"))
+Thresholds <- read.csv(file.path(here(), "exported-data", "thresholds.csv"))
 Thresholds %<>% filter(rotation_nb == 1)
 
 
